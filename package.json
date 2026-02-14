@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Automated task execution loop using Claude Code or OpenCode with TUI dashboard",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anomalyco/bart-loop"
+  },
   "bin": {
     "bart": "./bin/bart"
   },
@@ -13,7 +17,7 @@
     "test": "bun run src/index.ts status"
   },
   "keywords": ["cli", "automation", "tasks", "claude", "opencode", "tui"],
-  "author": "",
+  "author": "Leandro Storoli",
   "license": "MIT",
   "dependencies": {
     "@opentui/core": "^0.1.79"
@@ -26,5 +30,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
