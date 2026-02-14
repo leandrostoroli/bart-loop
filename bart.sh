@@ -14,7 +14,8 @@ PLAN_FILE="${PLAN_FILE:-}"
 LOG_DIR="${LOG_DIR:-$PROJECT_ROOT/.bart/logs}"
 LOCK_DIR="${LOCK_DIR:-$PROJECT_ROOT/.bart/.locks}"
 AGENT_CLI="${AGENT_CLI:-auto}"
-AGENT_ARGS="${AGENT_ARGS:---verbose --print --output-format stream-json}"
+AGENT_VERBOSE="${AGENT_VERBOSE:-false}"
+AGENT_ARGS="${AGENT_ARGS:---print --output-format stream-json}"
 AUTO_COMMIT="${AUTO_COMMIT:-true}"
 LOOP_NAME="${LOOP_NAME:-Bart Loop}"
 
@@ -61,10 +62,15 @@ fi
 
 # Get default args for the specific CLI
 get_agent_args() {
+    local verbose_flag=""
+    if [ "$AGENT_VERBOSE" = "true" ]; then
+        verbose_flag="--verbose"
+    fi
+    
     if [ "$AGENT_CMD" = "opencode" ]; then
-        echo "${AGENT_ARGS}"
+        echo "${verbose_flag} ${AGENT_ARGS}"
     else
-        echo "--dangerously-skip-permissions ${AGENT_ARGS}"
+        echo "--dangerously-skip-permissions ${verbose_flag} ${AGENT_ARGS}"
     fi
 }
 

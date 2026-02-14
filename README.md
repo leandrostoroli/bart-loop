@@ -97,7 +97,13 @@ All configuration is in-code with sensible defaults:
 | `LOG_DIR` | `.bart/logs` | Execution logs |
 | `LOCK_DIR` | `.bart/.locks` | Parallel locks |
 | `AGENT_CLI` | `auto` | Use opencode or claude |
+| `AGENT_VERBOSE` | `false` | Enable verbose agent output |
 | `AUTO_COMMIT` | `true` | Auto-commit completed work |
+
+Override in code before running or set as env var:
+```bash
+AGENT_VERBOSE=true ./bart.sh --status
+```
 
 ## Project Structure
 
