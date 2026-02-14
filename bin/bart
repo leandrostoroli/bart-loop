@@ -1,0 +1,10 @@
+#!/bin/bash
+# Bart CLI - Auto-generated wrapper
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Find bun
+BUN="${BUN:-bun}"
+
+exec "$BUN" "$PROJECT_ROOT/src/index.ts" "$@"

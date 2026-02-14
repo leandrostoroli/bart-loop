@@ -1,0 +1,202 @@
+{
+  "project": "bart-loop",
+  "plan_file": "./.bart/plan.md",
+  "project_root": "/Users/leandrostoroli/github/bart-loop",
+  "tasks": [
+    {
+      "id": "A1",
+      "workstream": "A",
+      "title": "Initialize project structure",
+      "description": "Initialize project structure",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    },
+    {
+      "id": "A2",
+      "workstream": "A",
+      "title": "Configure TypeScript",
+      "description": "Configure TypeScript",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    },
+    {
+      "id": "A3",
+      "workstream": "A",
+      "title": "Set up ESLint",
+      "description": "Set up ESLint",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    },
+    {
+      "id": "A4",
+      "workstream": "A",
+      "title": "Create database schema",
+      "description": "Create database schema",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    },
+    {
+      "id": "A5",
+      "workstream": "A",
+      "title": "Build authentication",
+      "description": "Build authentication",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    },
+    {
+      "id": "A6",
+      "workstream": "A",
+      "title": "Implement user API",
+      "description": "Implement user API",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    },
+    {
+      "id": "B1",
+      "workstream": "B",
+      "title": "Build React components",
+      "description": "Build React components",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    },
+    {
+      "id": "B2",
+      "workstream": "B",
+      "title": "Add state management",
+      "description": "Add state management",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    },
+    {
+      "id": "B3",
+      "workstream": "B",
+      "title": "Style with CSS",
+      "description": "Style with CSS",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    },
+    {
+      "id": "B4",
+      "workstream": "B",
+      "title": "Write unit tests",
+      "description": "Write unit tests",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    },
+    {
+      "id": "B5",
+      "workstream": "B",
+      "title": "Integration tests",
+      "description": "Integration tests",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    },
+    {
+      "id": "C1",
+      "workstream": "C",
+      "title": "Docker configuration",
+      "description": "Docker configuration",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    },
+    {
+      "id": "C2",
+      "workstream": "C",
+      "title": "CI/CD pipeline",
+      "description": "CI/CD pipeline",
+      "files": [
+        "TBD"
+      ],
+      "depends_on": [],
+      "status": "pending",
+      "files_modified": [],
+      "started_at": null,
+      "completed_at": null,
+      "error": null
+    }
+  ]
+}
