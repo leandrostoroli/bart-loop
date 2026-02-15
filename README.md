@@ -13,6 +13,14 @@ Autonomous task execution loop using AI agents. Break down your project into tas
 - **Session Resume** - Interrupted tasks can resume from where they left off
 - **Auto-Commit** - Automatically commits completed work to git
 
+## Install
+
+```bash
+npm install -g bart-loop
+```
+
+Requires: [Bun](https://bun.sh) or Node.js 18+, [OpenCode](https://opencode.ai) or [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview), and `jq`.
+
 ## Quick Start
 
 ```bash
@@ -34,21 +42,22 @@ cat > plan.md << 'EOF'
 EOF
 
 # 2. Generate tasks from plan
-./bart.sh --plan
+bart plan
 
 # 3. Run tasks
-./bart.sh
+bart
 ```
 
 ## Usage
 
 ```bash
-./bart.sh                    # Run next available task
-./bart.sh --status           # Show progress
-./bart.sh --watch            # Live dashboard
-./bart.sh --workstream B     # Run specific workstream
-./bart.sh --task A1          # Run specific task
-./bart.sh --reset A1         # Reset failed task
+bart                    # Run next available task
+bart status            # Show progress
+bart watch            # Live dashboard
+bart plan             # Generate tasks from plan.md
+bart run A1           # Run specific task
+bart reset A1          # Reset failed task
+bart --workstream B   # Run next task in workstream B
 ```
 
 ## Parallel Execution
@@ -57,13 +66,13 @@ Run multiple workstreams in separate terminals:
 
 ```bash
 # Terminal 1
-./bart.sh --workstream A
+bart --workstream A
 
 # Terminal 2
-./bart.sh --workstream B
+bart --workstream B
 
 # Terminal 3
-./bart.sh --workstream C
+bart --workstream C
 ```
 
 ## How It Works
@@ -80,12 +89,6 @@ Run multiple workstreams in separate terminals:
 - **C** - Testing & integration
 - **D** - Deployment & polish
 
-## Requirements
-
-- [Bun](https://bun.sh) or Node.js 18+
-- [OpenCode CLI](https://opencode.ai) or [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
-- `jq` (`brew install jq`)
-
 ## Configuration
 
 All configuration is in-code with sensible defaults:
@@ -100,9 +103,9 @@ All configuration is in-code with sensible defaults:
 | `AGENT_VERBOSE` | `false` | Enable verbose agent output |
 | `AUTO_COMMIT` | `true` | Auto-commit completed work |
 
-Override in code before running or set as env var:
+Override with environment variables:
 ```bash
-AGENT_VERBOSE=true ./bart.sh --status
+AGENT_VERBOSE=true bart status
 ```
 
 ## Project Structure
@@ -110,13 +113,11 @@ AGENT_VERBOSE=true ./bart.sh --status
 ```
 your-project/
 ├── plan.md                 # Your project plan
-├── .bart/
-│   ├── tasks.json          # Generated tasks
-│   ├── plan.md            # Copied plan
-│   ├── logs/               # Execution logs
-│   └── .locks/             # Parallel execution locks
-└── bart-loop/
-    └── bart.sh             # Bart executable
+└── .bart/
+    ├── tasks.json          # Generated tasks
+    ├── plan.md            # Copied plan
+    ├── logs/               # Execution logs
+    └── .locks/             # Parallel execution locks
 ```
 
 ## License
