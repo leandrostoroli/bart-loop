@@ -1,6 +1,6 @@
 {
   "name": "bart-loop",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Automated task execution loop using Claude Code or OpenCode with TUI dashboard",
   "type": "module",
   "repository": {
@@ -8,13 +8,12 @@
     "url": "git+https://github.com/leandrostoroli/bart-loop.git"
   },
   "bin": {
-    "bart": "bin/bart"
+    "bart": "src/index.ts"
   },
   "scripts": {
     "start": "bun run src/index.ts",
     "dashboard": "bun run src/index.ts dashboard",
-    "status": "bun run src/index.ts status",
-    "test": "bun run src/index.ts status"
+    "status": "bun run src/index.ts status"
   },
   "keywords": [
     "cli",
@@ -44,5 +43,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "optionalDependencies": {
+    "bun": ">=1.0"
   }
 }
