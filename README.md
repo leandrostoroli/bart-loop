@@ -1,4 +1,4 @@
-<img src="bart-loop.jpg" alt="Bart Loop" align="center" width="600">
+<img src="bart-loop.jpg" alt="Bart Loop" align="center" width="400"> <img src="bart-loop-dashboard.png" alt="Bart Dashboard" align="center" width="400">
 
 # Bart Loop
 
