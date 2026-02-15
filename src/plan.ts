@@ -4,21 +4,11 @@ import { Task, Requirement } from "./constants.js";
 import { findFile } from "./tasks.js";
 import { discoverSpecialists, matchSpecialist } from "./specialists.js";
 
-export function findLatestClaudePlan(cwd: string): string | undefined {
-  const claudePlansDir = join(process.env.HOME || "", ".claude", "plans");
-  const projectPlansDir = join(cwd, ".claude", "plans");
-  
-  const searchDirs = [];
-  if (existsSync(projectPlansDir)) {
-    searchDirs.push(projectPlansDir);
-  }
-  if (existsSync(claudePlansDir)) {
-    searchDirs.push(claudePlansDir);
-  }
-  
+function findLatestPlanInDirs(dirs: string[]): string | undefined {
   let latestPlan: { path: string; mtime: number } | null = null;
-  
-  for (const dir of searchDirs) {
+
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue;
     try {
       const files = readdirSync(dir);
       for (const file of files) {
@@ -32,8 +22,19 @@ export function findLatestClaudePlan(cwd: string): string | undefined {
       }
     } catch {}
   }
-  
+
   return latestPlan?.path || undefined;
+}
+
+export function findLatestBartPlan(cwd: string): string | undefined {
+  return findLatestPlanInDirs([join(cwd, ".bart", "plans")]);
+}
+
+export function findLatestClaudePlan(cwd: string): string | undefined {
+  return findLatestPlanInDirs([
+    join(cwd, ".claude", "plans"),
+    join(process.env.HOME || "", ".claude", "plans"),
+  ]);
 }
 
 function parseExplicitRequirements(lines: string[]): Requirement[] | null {
@@ -242,37 +243,49 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
 
 export async function runPlanCommand(cwd: string, tasksPath: string, planPathArg?: string, useLatestPlan?: boolean, autoConfirm?: boolean) {
   let planPath = planPathArg;
-  
+
   if (!planPath && useLatestPlan) {
-    console.log("🔍 Searching for latest Claude plan...");
-    planPath = findLatestClaudePlan(cwd) || undefined;
+    // Check .bart/plans/ first, then Claude's plans
+    console.log("🔍 Searching for latest plan...");
+    planPath = findLatestBartPlan(cwd) || undefined;
     if (planPath) {
-      console.log(`   Found: ${planPath}\n`);
-      
-      if (!autoConfirm) {
-        const readline = require("readline").createInterface({
-          input: process.stdin,
-          output: process.stdout
+      console.log(`   Found (bart): ${planPath}\n`);
+    } else {
+      planPath = findLatestClaudePlan(cwd) || undefined;
+      if (planPath) {
+        console.log(`   Found (claude): ${planPath}\n`);
+      }
+    }
+
+    if (planPath && !autoConfirm) {
+      const readline = require("readline").createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      const confirmed = await new Promise<boolean>((resolve) => {
+        readline.question("Use this plan? (Y/n) ", (answer: string) => {
+          readline.close();
+          resolve(answer.trim().toLowerCase() !== "n");
         });
-        
-        const confirmed = await new Promise<boolean>((resolve) => {
-          readline.question("Use this plan? (Y/n) ", (answer: string) => {
-            readline.close();
-            resolve(answer.trim().toLowerCase() !== "n");
-          });
-        });
-        
-        if (!confirmed) {
-          console.log("Cancelled.");
-          return;
-        }
+      });
+
+      if (!confirmed) {
+        console.log("Cancelled.");
+        return;
       }
     }
   }
-  
+
   if (!planPath) {
-    const foundPlan = findFile("plan.md", cwd) || findFile("PLAN.md", cwd);
-    planPath = foundPlan || undefined;
+    // Fall back to plan.md in .bart/ or project root
+    const bartPlan = join(cwd, ".bart", "plan.md");
+    if (existsSync(bartPlan)) {
+      planPath = bartPlan;
+    } else {
+      const foundPlan = findFile("plan.md", cwd) || findFile("PLAN.md", cwd);
+      planPath = foundPlan || undefined;
+    }
   } else if (!existsSync(planPath)) {
     console.error(`Plan file not found: ${planPath}`);
     process.exit(1);
@@ -325,17 +338,22 @@ Example plan.md:
     }
   }
 
-  const bartDir = join(cwd, ".bart");
-  if (!existsSync(bartDir)) {
-    mkdirSync(bartDir, { recursive: true });
-  }
+  const bartPlansDir = join(cwd, ".bart", "plans");
+  mkdirSync(bartPlansDir, { recursive: true });
 
-  const destPlanPath = join(bartDir, "plan.md");
+  // Derive a descriptive name from the plan's first heading or source filename
+  const titleMatch = planContent.match(/^#\s+(?:Plan:\s*)?(.+)/m);
+  const slug = titleMatch
+    ? titleMatch[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "").slice(0, 60)
+    : "plan";
+  const timestamp = new Date().toISOString().slice(0, 10);
+  const destPlanName = `${timestamp}-${slug}.md`;
+  const destPlanPath = join(bartPlansDir, destPlanName);
   writeFileSync(destPlanPath, planContent);
 
   const tasksData = {
     project: cwd.split("/").pop() || "project",
-    plan_file: "./.bart/plan.md",
+    plan_file: `./.bart/plans/${destPlanName}`,
     project_root: cwd,
     requirements: requirements.length > 0 ? requirements : undefined,
     tasks

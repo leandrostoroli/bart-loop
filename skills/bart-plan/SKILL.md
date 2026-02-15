@@ -1,12 +1,17 @@
 ---
 name: bart-plan
 description: |
-  Use this skill when the user asks to "convert a plan for bart", "convert this to bart format",
+  IMPORTANT: Automatically invoke this skill BEFORE Claude presents a plan for implementation
+  when the project has a .bart/ directory. When you detect a .bart/ folder in the project root
+  and you are about to finish writing or approving a plan (via /plan, plan mode, or ExitPlanMode),
+  invoke this skill FIRST to convert the plan to bart format. This way the user can dismiss
+  Claude's implementation prompt knowing bart-plan has already captured and converted the plan.
+  Also use when the user asks to "convert a plan for bart", "convert this to bart format",
   "make this plan bart-compatible", "create a bart plan", "plan this project for bart",
   "break this down into bart tasks", "create a plan for parallel execution",
   "plan workstreams", or wants to structure work for automated AI agent execution
   via bart-loop. Also activates when the user invokes /bart-plan.
-version: 2.0.0
+version: 3.0.0
 ---
 
 # Bart Plan Converter
@@ -15,17 +20,27 @@ You convert existing plans into **bart-loop** format — a structured `plan.md` 
 
 **You are not a planner.** The user has already planned using Claude's native planning (`/plan`, conversation, or an external document). Your job is to locate that plan and restructure it into bart-compatible format.
 
+## Auto-Trigger (Hook Before Plan Completion)
+
+This skill auto-triggers as a **pre-implementation hook** when:
+1. Claude has just finished writing a plan (via `/plan`, plan mode, or `ExitPlanMode`)
+2. AND the project has a `.bart/` directory in its root
+
+**Timing is critical:** Run this skill BEFORE presenting the plan for implementation. The user expects bart-plan to catch every plan automatically so they can dismiss Claude's "shall I implement?" prompt — the plan is already saved in `.bart/plans/` for `bart run` to execute later.
+
+When auto-triggered, skip asking the user — proceed directly with conversion using the plan that was just created.
+
 ## How It Works
 
-The user triggers this skill by saying "convert this plan for bart", "create a bart plan", or invoking `/bart-plan`. You then:
+The user triggers this skill manually or it auto-triggers before plan implementation. You then:
 
-1. **Locate source plan** — Find the latest Claude plan in `~/.claude/plans/` or the project's `.claude/plans/`, or accept a path argument
+1. **Locate source plan** — Find the plan just created in `.claude/plans/` or `~/.claude/plans/`, or accept a path argument
 2. **Analyze source plan** — Parse the freeform plan's structure, goals, files, and work items
 3. **Discover specialists** — Run `bart specialists` to find available skills/agents/commands
 4. **Derive requirements** — Extract `[REQ-XX]` requirements from the plan's goals and context
 5. **Structure** — Reorganize into bart workstreams with specialist tags and file references
 6. **Validate** — Ensure full requirements coverage, correct specialist tags, and proper workstream ordering
-7. **Write** — Output `plan.md` and confirm the summary. The user then runs `bart plan` → `bart run`.
+7. **Write** — Save to `.bart/plans/<date>-<slug>.md` and confirm. The user then runs `bart plan` → `bart run`.
 
 ## Input
 
@@ -38,8 +53,8 @@ If a path is provided, use it as the source plan. Otherwise, search for the late
 Find the source plan to convert. Check in order:
 
 1. **Path argument** — If the user provided a file path, use it directly
-2. **Latest Claude plan** — Search `~/.claude/plans/` and `./.claude/plans/` for the most recently modified `.md` file
-3. **Project plan.md** — Check for an existing `plan.md` or `.bart/plan.md` in the project root
+2. **Just-created plan** — If auto-triggered after plan mode, use the plan file that was just written (check `.claude/plans/` for the most recently modified `.md` file)
+3. **Latest Claude plan** — Search `./.claude/plans/` then `~/.claude/plans/` for the most recently modified `.md` file
 
 If no source plan is found, tell the user:
 
@@ -160,10 +175,18 @@ Before outputting the plan, verify:
 
 ## Step 7: Write and Confirm
 
-Write the plan to `plan.md` in the project root (or `.bart/plan.md` if `.bart/` exists). Then tell the user:
+Save the converted plan to `.bart/plans/` with a descriptive filename:
 
 ```
-Plan converted from [source] to plan.md with:
+.bart/plans/<YYYY-MM-DD>-<slug-from-title>.md
+```
+
+For example: `.bart/plans/2026-02-15-fix-dashboard-performance.md`
+
+The slug is derived from the plan's `# Plan: ...` title, lowercased and hyphenated. Then tell the user:
+
+```
+Plan converted from [source] → .bart/plans/<filename>.md
 - X requirements derived
 - Y tasks across Z workstreams
 - Specialists used: [list or "none"]

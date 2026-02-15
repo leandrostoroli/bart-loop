@@ -76,10 +76,10 @@ Usage:
   bart status            Show task status
   bart dashboard         Launch TUI dashboard
   bart plan              Generate tasks from plan.md
-  bart plan --latest     Generate tasks from latest Claude plan (prompts for confirmation)
-  bart plan --latest -y  Generate tasks from latest Claude plan (skip confirmation)
-  bart convert           Convert latest Claude plan to bart format (alias for plan --latest)
-  bart convert <path>    Convert a specific plan file to bart format
+  bart plan --latest     Generate tasks from latest plan (.bart/plans/ first, then Claude plans)
+  bart plan --latest -y  Generate tasks from latest plan (skip confirmation)
+  bart convert           Convert latest plan to bart tasks (checks .bart/plans/ first)
+  bart convert <path>    Convert a specific plan file to bart tasks
   bart plan --plan <path>  Generate tasks from custom plan file
   bart watch             Auto-refresh dashboard
   bart requirements      Show requirements coverage report
@@ -493,11 +493,9 @@ export async function main() {
       const packageRoot = dirname(dirname(new URL(import.meta.url).pathname));
 
       const skills = [
-        { src: join(packageRoot, "skills", "bart-plan", "SKILL.md"), dest: join(claudeSkillsDir, "bart-plan.skill"), name: "bart-plan" },
-        { src: join(packageRoot, "SKILL.md"), dest: join(claudeSkillsDir, "bart-loop.skill"), name: "bart-loop" },
+        { src: join(packageRoot, "skills", "bart-plan", "SKILL.md"), dir: join(claudeSkillsDir, "bart-plan"), name: "bart-plan" },
+        { src: join(packageRoot, "SKILL.md"), dir: join(claudeSkillsDir, "bart-loop"), name: "bart-loop" },
       ];
-
-      mkdirSync(claudeSkillsDir, { recursive: true });
 
       let installed = 0;
       for (const skill of skills) {
@@ -505,8 +503,9 @@ export async function main() {
           console.log(`⚠️  Source not found: ${skill.src}`);
           continue;
         }
-        copyFileSync(skill.src, skill.dest);
-        console.log(`✅ Installed ${skill.name} → ${skill.dest}`);
+        mkdirSync(skill.dir, { recursive: true });
+        copyFileSync(skill.src, join(skill.dir, "SKILL.md"));
+        console.log(`✅ Installed ${skill.name} → ${skill.dir}/SKILL.md`);
         installed++;
       }
 
