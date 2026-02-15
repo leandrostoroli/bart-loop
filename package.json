@@ -5,10 +5,10 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/leandrostoroli/bart-loop"
+    "url": "git+https://github.com/leandrostoroli/bart-loop.git"
   },
   "bin": {
-    "bart": "./bin/bart"
+    "bart": "bin/bart"
   },
   "scripts": {
     "start": "bun run src/index.ts",
@@ -16,7 +16,14 @@
     "status": "bun run src/index.ts status",
     "test": "bun run src/index.ts status"
   },
-  "keywords": ["cli", "automation", "tasks", "claude", "opencode", "tui"],
+  "keywords": [
+    "cli",
+    "automation",
+    "tasks",
+    "claude",
+    "opencode",
+    "tui"
+  ],
   "author": "Leandro Storoli",
   "license": "MIT",
   "dependencies": {

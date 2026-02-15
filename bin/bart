@@ -1,10 +1,21 @@
 #!/bin/bash
-# Bart CLI - Auto-generated wrapper
+# Bart CLI
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-# Find bun
 BUN="${BUN:-bun}"
 
-exec "$BUN" "$PROJECT_ROOT/src/index.ts" "$@"
+# Get the directory where this script is installed
+if [ -L "${BASH_SOURCE[0]}" ]; then
+    SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+else
+    SCRIPT_PATH="${BASH_SOURCE[0]}"
+fi
+
+# Find package root - go up from bin directory
+PACKAGE_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+
+# Verify package has src/index.ts, otherwise try npm root -g
+if [ ! -f "$PACKAGE_DIR/src/index.ts" ]; then
+    PACKAGE_DIR="$(npm root -g)/bart-loop"
+fi
+
+exec "$BUN" "$PACKAGE_DIR/src/index.ts" "$@"
