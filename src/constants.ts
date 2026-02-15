@@ -7,12 +7,7 @@ export const BART_ASCII = `
    ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ 
 `;
 
-export const BART_MINI = ` ██████╗ ███████╗████████╗
-  ██╔════╝ ██╔════╝╚══██╔══╝
-  ██║  ███╗█████╗     ██║   
-  ██║   ██║██╔══╝     ██║   
-  ╚██████╔╝███████╗   ██║   
-   ╚═════╝ ╚══════╝   ╚═╝   `;
+export const BART_MINI = `BART`;
 
 export const TASKS_FILE = ".bart/tasks.json";
 export const PROMPT_TEMPLATE = ".bart/bart-prompt-template.md";
