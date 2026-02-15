@@ -8,6 +8,7 @@ import { runDashboard } from "./dashboard.js";
 import { runPlanCommand } from "./plan.js";
 import { sendNotification, isNotificationConfigured } from "./notify.js";
 import { discoverSpecialists, printSpecialists, parseFrontmatter } from "./specialists.js";
+import { generateZshCompletion, generateBashCompletion, installCompletions } from "./completions.js";
 
 const CONFIG_DIR = join(process.env.HOME || "", ".bart");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -161,7 +162,10 @@ Usage:
   bart requirements --gaps  Show only uncovered/partial requirements
   bart specialists       List discovered specialists (skills, agents, commands)
   bart reset <task-id>   Reset task to pending
-  bart install           Install bart skills globally (enables auto-trigger in Claude/OpenCode)
+  bart completions zsh   Output zsh completion script to stdout
+  bart completions bash  Output bash completion script to stdout
+  bart completions install  Auto-detect shell and install completions
+  bart install           Install bart skills and shell completions
   bart init              Initialize bart in current project
   bart config            Show current config
   bart config --agent <name>  Set default agent (claude, opencode)
@@ -574,6 +578,31 @@ export async function main() {
       }
       break;
       
+    case "completions": {
+      const subcommand = specificTask;
+      if (subcommand === "zsh") {
+        process.stdout.write(generateZshCompletion());
+      } else if (subcommand === "bash") {
+        process.stdout.write(generateBashCompletion());
+      } else if (subcommand === "install") {
+        const shellEnv = process.env.SHELL || "";
+        const detectedShell = shellEnv.includes("zsh") ? "zsh" : shellEnv.includes("bash") ? "bash" : "";
+        if (!detectedShell) {
+          console.error("Could not detect shell from $SHELL. Use 'bart completions zsh' or 'bart completions bash' instead.");
+          process.exit(1);
+        }
+        console.log(`\nInstalling ${detectedShell} completions...`);
+        await installCompletions(detectedShell);
+        console.log(`\n✅ ${detectedShell} completions installed. Restart your shell or run 'source ~/.${detectedShell}rc' to activate.`);
+      } else {
+        console.log("Usage: bart completions <zsh|bash|install>");
+        console.log("  zsh     Output zsh completion script to stdout");
+        console.log("  bash    Output bash completion script to stdout");
+        console.log("  install Auto-detect shell and install completions");
+      }
+      break;
+    }
+
     case "install": {
       const home = process.env.HOME || "";
       const claudeSkillsDir = join(home, ".claude", "skills");
@@ -603,6 +632,15 @@ export async function main() {
       } else {
         console.error("\n❌ No skills found to install.");
         process.exit(1);
+      }
+
+      // Also install shell completions
+      const shellEnv = process.env.SHELL || "";
+      const detectedShell = shellEnv.includes("zsh") ? "zsh" : shellEnv.includes("bash") ? "bash" : "";
+      if (detectedShell) {
+        console.log(`\nInstalling ${detectedShell} completions...`);
+        await installCompletions(detectedShell);
+        console.log(`✅ Shell completions installed. Restart your shell or run 'source ~/.${detectedShell}rc' to activate.`);
       }
       break;
     }

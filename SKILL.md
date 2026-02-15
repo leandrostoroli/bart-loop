@@ -253,13 +253,13 @@ bart plan --workstreams A,B,C,D
 
 ## AI-Assisted Plan Conversion
 
-For converting existing plans into bart format, use the **bart-plan** skill (`skills/bart-plan/SKILL.md`) which takes a plan you've already created (via Claude's `/plan`, conversation, or an external document) and converts it into bart-compatible format with:
+The **bart-plan** skill (`skills/bart-plan/SKILL.md`) is a **converter, not a planner**. It takes a plan you've already created (via Claude's `/plan`, plan mode, conversation, or an external document) and restructures it into bart-compatible format with:
 - Explicit `## Requirements` section with `[REQ-XX]` IDs for coverage tracking
 - Workstream-aware `##` section organization for parallel execution
 - `[specialist-name]` tags on `###` tasks for specialist routing
 - File references for each task
 
-The bart-plan skill converts freeform plans into structured `plan.md` files that parse into high-quality tracked tasks via `bart plan`.
+It auto-triggers before plan implementation when a `.bart/` directory exists, converting freeform plans into structured `plan.md` files that parse into high-quality tracked tasks via `bart plan`.
 
 ## Integration with AI Agents
 
