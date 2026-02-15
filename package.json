@@ -13,7 +13,12 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "dashboard": "bun run src/index.ts dashboard",
-    "status": "bun run src/index.ts status"
+    "status": "bun run src/index.ts status",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
+    "postinstall": "node scripts/postinstall.js"
   },
   "keywords": [
     "cli",
@@ -41,6 +46,12 @@
   "engines": {
     "node": ">=18"
   },
+  "files": [
+    "src/**/*",
+    "skills/**/*",
+    "bart-prompt-template.md",
+    "scripts/**/*"
+  ],
   "publishConfig": {
     "access": "public"
   },

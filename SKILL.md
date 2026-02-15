@@ -65,6 +65,8 @@ Create a JSON file with this structure:
       "files": ["<file1>", "<file2>"],
       "depends_on": ["<task-id>"],
       "status": "pending",
+      "requirements": ["<REQ-ID>"],
+      "specialist": "<matched-specialist-name>",
       "files_modified": [],
       "started_at": null,
       "completed_at": null,
@@ -196,6 +198,38 @@ Create a JSON file with this structure:
 }
 ```
 
+## Optional: Requirements Section
+
+Plans CAN include a `## Requirements` section with explicit requirement IDs:
+
+```markdown
+## Requirements
+- [REQ-01] User can log in with email/password
+- [REQ-02] Dashboard shows real-time metrics
+- [REQ-03] API returns paginated results
+```
+
+Tasks can reference requirements with `[REQ-XX]` markers in their description or heading. If no `## Requirements` section exists, requirement groups are auto-generated from `##` section headings.
+
+## Optional: Specialist Tags
+
+Tasks can be explicitly assigned to a specialist by adding a tag in the heading:
+
+```markdown
+### [frontend-dev] Build login form
+### [database] Create migration schema
+```
+
+Specialists are discovered automatically from the Claude Code ecosystem:
+1. `./.claude/commands/` — project-local commands
+2. `./.claude/agents/` — project-local agents
+3. `~/.claude/commands/` — global commands
+4. `~/.claude/agents/` — global agents
+5. `~/.claude/plugins/*/skills/*/SKILL.md` — plugin skills
+6. `~/.claude/skills/` — standalone skill files
+
+If no explicit tag is provided, tasks are auto-matched to specialists based on file extension heuristics and keyword matching.
+
 ## Key Principles
 
 1. **Parallelize where possible**: Group independent tasks in different workstreams
@@ -216,6 +250,16 @@ bart plan --plan my-plan.md
 # With custom workstreams
 bart plan --workstreams A,B,C,D
 ```
+
+## AI-Assisted Plan Creation
+
+For AI-assisted plan creation, use the **bart-plan** skill (`skills/bart-plan/SKILL.md`) which guides the AI to produce optimized plans with:
+- Explicit `## Requirements` section with `[REQ-XX]` IDs for coverage tracking
+- Workstream-aware `##` section organization for parallel execution
+- `[specialist-name]` tags on `###` tasks for specialist routing
+- File references for each task
+
+The bart-plan skill ensures plans parse into high-quality tracked tasks via `bart plan`.
 
 ## Integration with AI Agents
 

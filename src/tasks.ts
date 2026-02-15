@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
-import { Task, TasksData } from "./constants.js";
+import { Task, TasksData, Requirement } from "./constants.js";
 
 export function findFile(name: string, startDir: string): string | null {
   let dir = startDir;
@@ -61,4 +61,30 @@ export function depsMet(tasks: TasksData, taskId: string): boolean {
 
 export function getTaskById(tasks: TasksData, taskId: string): Task | undefined {
   return tasks.tasks.find(t => t.id === taskId);
+}
+
+export function calculateCoverage(tasks: TasksData): Requirement[] {
+  if (!tasks.requirements || tasks.requirements.length === 0) return [];
+
+  return tasks.requirements.map(req => {
+    const coveringTasks = req.covered_by
+      .map(id => tasks.tasks.find(t => t.id === id))
+      .filter(Boolean) as Task[];
+
+    const completedCount = coveringTasks.filter(t => t.status === "completed").length;
+    const totalCount = coveringTasks.length;
+
+    let status: Requirement["status"];
+    if (totalCount === 0) {
+      status = "none";
+    } else if (completedCount === totalCount) {
+      status = "complete";
+    } else if (completedCount > 0) {
+      status = "partial";
+    } else {
+      status = "none";
+    }
+
+    return { ...req, status };
+  });
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { render, Box, Text, useInput } from "ink";
-import { BART, TasksData, Task } from "./constants.js";
-import { readTasks, depsMet } from "./tasks.js";
+import { BART, TasksData, Task, Requirement } from "./constants.js";
+import { readTasks, depsMet, calculateCoverage } from "./tasks.js";
 
 function getWorkstreams(tasks: TasksData): string[] {
   return [...new Set(tasks.tasks.map(t => t.workstream))].sort();
@@ -232,6 +232,53 @@ const ErrorPanel: React.FC<ErrorPanelProps> = ({ tasks }) => {
   );
 };
 
+// ── Requirements Panel ─────────────────────────────────────
+
+interface RequirementsPanelProps {
+  tasks: TasksData;
+}
+
+function reqStatusColor(status: Requirement["status"]): string {
+  switch (status) {
+    case "complete": return "green";
+    case "partial": return "yellow";
+    case "none": return "gray";
+  }
+}
+
+function reqStatusIcon(status: Requirement["status"]): string {
+  switch (status) {
+    case "complete": return "\u2713";
+    case "partial": return "\u25D0";
+    case "none": return "\u25CB";
+  }
+}
+
+const RequirementsPanel: React.FC<RequirementsPanelProps> = ({ tasks }) => {
+  const reqs = calculateCoverage(tasks);
+  if (reqs.length === 0) return null;
+
+  const complete = reqs.filter(r => r.status === "complete").length;
+  const total = reqs.length;
+  const pct = total > 0 ? Math.round((complete / total) * 100) : 0;
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginTop={1}>
+      <Text bold color="cyan">Requirements [{createProgressBar(pct, 12)}] {pct}% ({complete}/{total})</Text>
+      {reqs.map(req => (
+        <Box key={req.id} flexDirection="row">
+          <Text color={reqStatusColor(req.status)}> {reqStatusIcon(req.status)} </Text>
+          <Text color={reqStatusColor(req.status)}>{req.id}</Text>
+          <Text color="white"> {req.description}</Text>
+          {req.covered_by.length > 0 && (
+            <Text color="gray" dimColor> [{req.covered_by.join(",")}]</Text>
+          )}
+        </Box>
+      ))}
+    </Box>
+  );
+};
+
 // ── Main Dashboard ─────────────────────────────────────────
 
 interface DashboardProps {
@@ -282,6 +329,7 @@ const Dashboard: React.FC<DashboardProps> = ({ tasksPath }) => {
       </Box>
 
       <ErrorPanel tasks={tasks} />
+      <RequirementsPanel tasks={tasks} />
     </Box>
   );
 };

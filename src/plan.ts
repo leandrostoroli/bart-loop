@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
-import { Task } from "./constants.js";
+import { Task, Requirement } from "./constants.js";
 import { findFile } from "./tasks.js";
+import { discoverSpecialists, matchSpecialist } from "./specialists.js";
 
 export function findLatestClaudePlan(cwd: string): string | undefined {
   const claudePlansDir = join(process.env.HOME || "", ".claude", "plans");
@@ -35,19 +36,52 @@ export function findLatestClaudePlan(cwd: string): string | undefined {
   return latestPlan?.path || undefined;
 }
 
-export function parsePlanToTasks(planContent: string, cwd: string): Task[] {
+function parseExplicitRequirements(lines: string[]): Requirement[] | null {
+  const requirements: Requirement[] = [];
+  let inReqSection = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.match(/^##\s+Requirements\s*$/i)) {
+      inReqSection = true;
+      continue;
+    }
+    if (inReqSection && trimmed.startsWith("## ")) {
+      break;
+    }
+    if (inReqSection) {
+      const match = trimmed.match(/^-\s*\[(REQ-\w+)\]\s*(.+)$/);
+      if (match) {
+        requirements.push({
+          id: match[1],
+          description: match[2].trim(),
+          covered_by: [],
+          status: "none"
+        });
+      }
+    }
+  }
+
+  return requirements.length > 0 ? requirements : null;
+}
+
+function extractReqReferences(text: string): string[] {
+  const matches = text.match(/\[REQ-\w+\]/g);
+  if (!matches) return [];
+  return matches.map(m => m.slice(1, -1));
+}
+
+export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Task[]; requirements: Requirement[] } {
   const lines = planContent.split("\n");
   const tasks: Task[] = [];
   const workstreams = ["A", "B", "C", "D", "E", "F"];
   let currentWorkstreamIndex = 0;
   let currentWorkstreamTaskNum = 1;
-  
-  const workstreamSections: { [key: string]: number } = {};
-  
+
   const extractTitle = (line: string) => {
     return line.replace(/^#+\s*/, "").trim();
   };
-  
+
   const extractFiles = (content: string): string[] => {
     const filePatterns: string[] = [];
     const fileRegex = /[\w\/.-]+\.\w+/g;
@@ -57,15 +91,41 @@ export function parsePlanToTasks(planContent: string, cwd: string): Task[] {
     }
     return filePatterns.slice(0, 5);
   };
-  
+
+  // Check for explicit requirements section
+  const explicitReqs = parseExplicitRequirements(lines);
+  const isExplicitMode = explicitReqs !== null;
+
+  // Track current ## section for auto-extract mode
+  let currentSectionName = "";
+  const autoReqMap = new Map<string, Requirement>(); // sectionName -> Requirement
+
   let sectionIndex = 0;
   let sectionTaskCounts: { [key: number]: number } = {};
-  
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
-    
+
     if (trimmed.startsWith("## ") && !trimmed.startsWith("### ")) {
+      // Skip the Requirements section itself in auto-extract mode
+      const sectionTitle = extractTitle(trimmed);
+      if (!sectionTitle.match(/^Requirements$/i)) {
+        currentSectionName = sectionTitle;
+
+        if (!isExplicitMode && currentSectionName) {
+          const reqId = "REQ-" + currentSectionName.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/-+$/, "");
+          if (!autoReqMap.has(reqId)) {
+            autoReqMap.set(reqId, {
+              id: reqId,
+              description: currentSectionName,
+              covered_by: [],
+              status: "none"
+            });
+          }
+        }
+      }
+
       if (sectionIndex > 0 && sectionIndex % 2 === 0) {
         currentWorkstreamIndex = Math.min(currentWorkstreamIndex + 1, workstreams.length - 1);
         currentWorkstreamTaskNum = 1;
@@ -73,12 +133,12 @@ export function parsePlanToTasks(planContent: string, cwd: string): Task[] {
       sectionIndex++;
       sectionTaskCounts[sectionIndex] = 0;
     }
-    
+
     if (trimmed.startsWith("### ")) {
       const taskTitle = extractTitle(trimmed);
       const ws = workstreams[currentWorkstreamIndex];
       const taskId = `${ws}${currentWorkstreamTaskNum}`;
-      
+
       let description = taskTitle;
       let j = i + 1;
       while (j < lines.length && !lines[j].trim().startsWith("#")) {
@@ -89,22 +149,38 @@ export function parsePlanToTasks(planContent: string, cwd: string): Task[] {
         }
         j++;
       }
-      
+
+      // Determine requirements for this task
+      let taskReqs: string[] = [];
+      if (isExplicitMode) {
+        // Scan title and description for [REQ-XX] references
+        taskReqs = extractReqReferences(taskTitle + " " + description);
+        // Also scan the next few lines for references
+        for (let k = i; k < Math.min(i + 10, lines.length); k++) {
+          taskReqs.push(...extractReqReferences(lines[k]));
+        }
+        taskReqs = [...new Set(taskReqs)];
+      } else if (currentSectionName) {
+        // Auto-extract: task inherits parent section's requirement
+        const reqId = "REQ-" + currentSectionName.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/-+$/, "");
+        taskReqs = [reqId];
+      }
+
       const files: string[] = [];
       for (let k = i; k < Math.min(i + 10, lines.length); k++) {
         files.push(...extractFiles(lines[k]));
       }
-      
-      const lastTaskInSection = sectionTaskCounts[sectionIndex] > 0 
-        ? `${ws}${sectionTaskCounts[sectionIndex]}` 
+
+      const lastTaskInSection = sectionTaskCounts[sectionIndex] > 0
+        ? `${ws}${sectionTaskCounts[sectionIndex]}`
         : null;
-      
+
       const hasDependency = taskTitle.toLowerCase().includes("depend") ||
         taskTitle.toLowerCase().includes("after") ||
         taskTitle.toLowerCase().includes("requir");
-      
+
       const depends_on = hasDependency && lastTaskInSection ? [lastTaskInSection] : [];
-      
+
       tasks.push({
         id: taskId,
         workstream: ws,
@@ -116,14 +192,15 @@ export function parsePlanToTasks(planContent: string, cwd: string): Task[] {
         files_modified: [],
         started_at: null,
         completed_at: null,
-        error: null
+        error: null,
+        requirements: taskReqs.length > 0 ? taskReqs : undefined
       });
-      
+
       currentWorkstreamTaskNum++;
       sectionTaskCounts[sectionIndex]++;
     }
   }
-  
+
   if (tasks.length === 0) {
     tasks.push({
       id: "A1",
@@ -139,8 +216,28 @@ export function parsePlanToTasks(planContent: string, cwd: string): Task[] {
       error: null
     });
   }
-  
-  return tasks;
+
+  // Build requirements list and coverage mapping
+  let requirements: Requirement[];
+  if (isExplicitMode) {
+    requirements = explicitReqs!;
+  } else {
+    requirements = [...autoReqMap.values()];
+  }
+
+  // Map tasks to requirements (covered_by)
+  for (const task of tasks) {
+    if (task.requirements) {
+      for (const reqId of task.requirements) {
+        const req = requirements.find(r => r.id === reqId);
+        if (req && !req.covered_by.includes(task.id)) {
+          req.covered_by.push(task.id);
+        }
+      }
+    }
+  }
+
+  return { tasks, requirements };
 }
 
 export async function runPlanCommand(cwd: string, tasksPath: string, planPathArg?: string, useLatestPlan?: boolean, autoConfirm?: boolean) {
@@ -210,32 +307,62 @@ Example plan.md:
   console.log(`\n📋 Found plan: ${planPath}\n`);
   
   const planContent = readFileSync(planPath, "utf-8");
-  const tasks = parsePlanToTasks(planContent, cwd);
-  
+  const { tasks, requirements } = parsePlanToTasks(planContent, cwd);
+
+  // Auto-assign specialists to tasks
+  const specialists = discoverSpecialists(cwd);
+  if (specialists.length > 0) {
+    let assigned = 0;
+    for (const task of tasks) {
+      const match = matchSpecialist(task, specialists);
+      if (match) {
+        task.specialist = match.name;
+        assigned++;
+      }
+    }
+    if (assigned > 0) {
+      console.log(`Specialists: ${assigned} task(s) auto-assigned from ${specialists.length} available specialist(s)`);
+    }
+  }
+
   const bartDir = join(cwd, ".bart");
   if (!existsSync(bartDir)) {
     mkdirSync(bartDir, { recursive: true });
   }
-  
+
   const destPlanPath = join(bartDir, "plan.md");
   writeFileSync(destPlanPath, planContent);
-  
+
   const tasksData = {
     project: cwd.split("/").pop() || "project",
     plan_file: "./.bart/plan.md",
     project_root: cwd,
+    requirements: requirements.length > 0 ? requirements : undefined,
     tasks
   };
-  
+
   writeFileSync(tasksPath, JSON.stringify(tasksData, null, 2));
-  
+
   console.log(`✅ Generated ${tasks.length} tasks in ${tasksPath}\n`);
-  
+
   const workstreams = [...new Set(tasks.map(t => t.workstream))].sort();
   console.log("Workstreams:");
   for (const ws of workstreams) {
     const wsTasks = tasks.filter(t => t.workstream === ws);
     console.log(`  ${ws}: ${wsTasks.length} tasks`);
   }
+
+  if (requirements.length > 0) {
+    const covered = requirements.filter(r => r.covered_by.length > 0).length;
+    console.log(`\nRequirements: ${covered}/${requirements.length} covered`);
+    const uncovered = requirements.filter(r => r.covered_by.length === 0);
+    if (uncovered.length > 0) {
+      console.log("  Uncovered:");
+      for (const r of uncovered) {
+        console.log(`    ${r.id}: ${r.description}`);
+      }
+    }
+  }
+
   console.log("\nRun 'bart status' or 'bart dashboard' to view progress.");
 }

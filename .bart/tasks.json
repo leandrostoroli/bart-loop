@@ -1,0 +1,131 @@
+{
+  "project": "bart-loop",
+  "plan_file": "./.bart/plan.md",
+  "project_root": "/Users/leandrostoroli/github/bart-loop",
+  "requirements": [
+    {
+      "id": "REQ-CONTEXT",
+      "description": "Context",
+      "covered_by": [],
+      "status": "none"
+    },
+    {
+      "id": "REQ-WHAT-TO-BUILD",
+      "description": "What to Build",
+      "covered_by": [
+        "A1",
+        "A2",
+        "A3",
+        "A4"
+      ],
+      "status": "none"
+    },
+    {
+      "id": "REQ-FILES-TO-MODIFY",
+      "description": "Files to Modify",
+      "covered_by": [],
+      "status": "none"
+    },
+    {
+      "id": "REQ-NEW-FILES",
+      "description": "New Files",
+      "covered_by": [],
+      "status": "none"
+    },
+    {
+      "id": "REQ-EXISTING-FILES-NO-CHANGES",
+      "description": "Existing Files (no changes)",
+      "covered_by": [],
+      "status": "none"
+    },
+    {
+      "id": "REQ-VERIFICATION",
+      "description": "Verification",
+      "covered_by": [],
+      "status": "none"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "A1",
+      "workstream": "A",
+      "title": "1. Add `bart install` command",
+      "description": "1. Add `bart install` command. New CLI command in `src/cli.ts` that copies the skill to global directories:",
+      "files": [
+        "src/cli.ts",
+        "/.claude",
+        "/.config"
+      ],
+      "depends_on": [],
+      "status": "completed",
+      "files_modified": [],
+      "started_at": "2026-02-15T18:00:45.151Z",
+      "completed_at": "2026-02-15T18:01:56.837Z",
+      "error": null,
+      "requirements": [
+        "REQ-WHAT-TO-BUILD"
+      ],
+      "specialist": "example-command"
+    },
+    {
+      "id": "A2",
+      "workstream": "A",
+      "title": "2. Postinstall hook in package.json",
+      "description": "2. Postinstall hook in package.json. Add an npm postinstall script so the skill gets installed automatically when the user runs `npm install -g bart-loop`:",
+      "files": [
+        "package.json",
+        "scripts/postinstall.js"
+      ],
+      "depends_on": [],
+      "status": "completed",
+      "files_modified": [],
+      "started_at": "2026-02-15T18:01:56.839Z",
+      "completed_at": "2026-02-15T18:02:53.363Z",
+      "error": null,
+      "requirements": [
+        "REQ-WHAT-TO-BUILD"
+      ],
+      "specialist": "plugin-structure"
+    },
+    {
+      "id": "A3",
+      "workstream": "A",
+      "title": "3. Update help text",
+      "description": "3. Update help text. Update `showHelp()` in `src/cli.ts` to include the new command:",
+      "files": [
+        "src/cli.ts"
+      ],
+      "depends_on": [],
+      "status": "completed",
+      "files_modified": [],
+      "started_at": "2026-02-15T18:02:53.365Z",
+      "completed_at": "2026-02-15T18:03:22.908Z",
+      "error": null,
+      "requirements": [
+        "REQ-WHAT-TO-BUILD"
+      ],
+      "specialist": "claude-md-improver"
+    },
+    {
+      "id": "A4",
+      "workstream": "A",
+      "title": "4. Move skill to a discoverable location in the package",
+      "description": "4. Move skill to a discoverable location in the package. Currently at `.claude/skills/bart-plan.skill`. This works for project-local usage but is hidden. Also add the skill to the package `files` field so it's included in the npm package:",
+      "files": [
+        ".claude/skills/bart-plan.skill",
+        "package.json",
+        "bart-prompt-template.md"
+      ],
+      "depends_on": [],
+      "status": "completed",
+      "files_modified": [],
+      "started_at": "2026-02-15T18:03:22.909Z",
+      "completed_at": "2026-02-15T18:04:18.911Z",
+      "error": null,
+      "requirements": [
+        "REQ-WHAT-TO-BUILD"
+      ],
+      "specialist": "plugin-settings"
+    }
+  ]
+}

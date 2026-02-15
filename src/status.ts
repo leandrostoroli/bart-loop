@@ -1,5 +1,5 @@
 import { BART, TasksData, Task } from "./constants.js";
-import { depsMet } from "./tasks.js";
+import { depsMet, calculateCoverage } from "./tasks.js";
 
 function statusIcon(status: Task["status"]): string {
   switch (status) {
@@ -41,6 +41,25 @@ export function printStatus(tasks: TasksData) {
   console.log(`\n${BART}`);
   console.log(`  [${bar}] ${pct}%  ${completed} done \u2022 ${inProgress} active \u2022 ${pending} pending${errorCount > 0 ? ` \u2022 ${errorCount} failed` : ""} (${total} total)\n`);
 
+  const reqs = calculateCoverage(tasks);
+  if (reqs.length > 0) {
+    const reqComplete = reqs.filter(r => r.status === "complete").length;
+    const reqPartial = reqs.filter(r => r.status === "partial").length;
+    const reqNone = reqs.filter(r => r.status === "none").length;
+    const parts = [`${reqComplete}/${reqs.length} complete`];
+    if (reqPartial > 0) parts.push(`${reqPartial} partial`);
+    if (reqNone > 0) parts.push(`${reqNone} uncovered`);
+    console.log(`  Requirements: ${parts.join(", ")}`);
+
+    const uncovered = reqs.filter(r => r.status === "none" && r.covered_by.length === 0);
+    if (uncovered.length > 0) {
+      for (const r of uncovered) {
+        console.log(`    \u25CB ${r.id}: ${r.description}`);
+      }
+    }
+    console.log("");
+  }
+
   for (const ws of workstreams) {
     const wsTasks = tasks.tasks.filter(t => t.workstream === ws);
     const wsCompleted = wsTasks.filter(t => t.status === "completed").length;
@@ -59,6 +78,7 @@ export function printStatus(tasks: TasksData) {
       const deps = task.depends_on.length > 0 ? task.depends_on.join(",") : "";
 
       let line = `  ${icon} ${task.id}: ${task.title}`;
+      if (task.specialist) line += ` [${task.specialist}]`;
       if (duration) line += ` (${duration})`;
       if (blocked && deps) line += ` [needs ${deps}]`;
       console.log(line);
@@ -109,16 +129,67 @@ export function printWorkstreamStatus(tasks: TasksData, workstream: string) {
     const deps = task.depends_on.length > 0 ? task.depends_on.join(",") : "";
 
     let line = `  ${icon} ${task.id}: ${task.title}`;
+    if (task.specialist) line += ` [${task.specialist}]`;
     if (duration) line += ` (${duration})`;
     if (blocked && deps) line += ` [needs ${deps}]`;
     console.log(line);
-    
+
     if (task.description) {
       console.log(`      ${task.description.substring(0, 70)}`);
     }
 
     if (task.status === "error" && task.error) {
       console.log(`      ${task.error.substring(0, 70)}`);
+    }
+  }
+  console.log("");
+}
+
+function reqStatusIcon(status: "none" | "partial" | "complete"): string {
+  switch (status) {
+    case "complete": return "\u2713";
+    case "partial": return "\u25D0";
+    case "none": return "\u25CB";
+  }
+}
+
+export function printRequirementsReport(tasks: TasksData, gapsOnly: boolean = false) {
+  const reqs = calculateCoverage(tasks);
+
+  if (reqs.length === 0) {
+    console.log("\nNo requirements found. Add a ## Requirements section to your plan, or requirements will be auto-generated from ## headings.\n");
+    return;
+  }
+
+  const complete = reqs.filter(r => r.status === "complete").length;
+  const partial = reqs.filter(r => r.status === "partial").length;
+  const none = reqs.filter(r => r.status === "none").length;
+  const pct = reqs.length > 0 ? Math.round((complete / reqs.length) * 100) : 0;
+
+  const barLen = 20;
+  const filled = Math.round((pct / 100) * barLen);
+  const bar = "\u2588".repeat(filled) + "\u2591".repeat(barLen - filled);
+
+  console.log(`\n${BART}`);
+  console.log(`  Requirements Coverage\n`);
+  console.log(`  [${bar}] ${pct}%  ${complete} complete \u2022 ${partial} partial \u2022 ${none} uncovered (${reqs.length} total)\n`);
+
+  const display = gapsOnly ? reqs.filter(r => r.status !== "complete") : reqs;
+
+  for (const req of display) {
+    const icon = reqStatusIcon(req.status);
+    const color = req.status === "complete" ? "done" : req.status === "partial" ? "partial" : "uncovered";
+    console.log(`  ${icon} ${req.id}: ${req.description} (${color})`);
+    if (req.covered_by.length > 0) {
+      for (const taskId of req.covered_by) {
+        const task = tasks.tasks.find(t => t.id === taskId);
+        if (task) {
+          const taskIcon = statusIcon(task.status);
+          console.log(`      ${taskIcon} ${task.id}: ${task.title}`);
+        }
+      }
+    } else {
+      console.log(`      (no tasks cover this requirement)`);
     }
   }
   console.log("");

@@ -1,12 +1,13 @@
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from "fs";
 import { join, dirname } from "path";
 import { spawn } from "child_process";
 import { BART, TASKS_FILE } from "./constants.js";
 import { readTasks, findNextTask, getCwd, findFile, getTaskById } from "./tasks.js";
-import { printStatus, printWorkstreamStatus } from "./status.js";
+import { printStatus, printWorkstreamStatus, printRequirementsReport } from "./status.js";
 import { runDashboard } from "./dashboard.js";
 import { runPlanCommand } from "./plan.js";
 import { sendNotification, isNotificationConfigured } from "./notify.js";
+import { discoverSpecialists, printSpecialists, parseFrontmatter } from "./specialists.js";
 
 const CONFIG_DIR = join(process.env.HOME || "", ".bart");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -29,7 +30,6 @@ function loadConfig(): BartConfig {
 function saveConfig(config: BartConfig) {
   try {
     if (!existsSync(CONFIG_DIR)) {
-      const { mkdirSync } = require("fs");
       mkdirSync(CONFIG_DIR, { recursive: true });
     }
     writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
@@ -80,7 +80,11 @@ Usage:
   bart plan --latest -y Generate tasks from latest Claude plan (skip confirmation)
   bart plan --plan <path>  Generate tasks from custom plan file
   bart watch             Auto-refresh dashboard
+  bart requirements      Show requirements coverage report
+  bart requirements --gaps  Show only uncovered/partial requirements
+  bart specialists       List discovered specialists (skills, agents, commands)
   bart reset <task-id>   Reset task to pending
+  bart install           Install bart skills globally (enables auto-trigger in Claude/OpenCode)
   bart init              Initialize bart in current project
   bart config            Show current config
   bart config --agent <name>  Set default agent (claude, opencode)
@@ -154,9 +158,27 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
   
   console.log(`🤖 Using agent: ${agentConfig.cmd}\n`);
   
+  // Build specialist context if task has an assigned specialist
+  let specialistContext = "";
+  if (task.specialist) {
+    const specialists = discoverSpecialists(projectRoot);
+    const specialist = specialists.find(s => s.name === task.specialist);
+    if (specialist) {
+      try {
+        const content = readFileSync(specialist.path, "utf-8");
+        const fm = parseFrontmatter(content);
+        const desc = fm.description || specialist.description;
+        specialistContext = `\nSpecialist: ${specialist.name} (${specialist.type})\nSpecialist context: ${desc}\n`;
+        console.log(`   Specialist: ${specialist.name} (${specialist.type})\n`);
+      } catch {
+        specialistContext = `\nSpecialist: ${specialist.name} (${specialist.type})\nSpecialist context: ${specialist.description}\n`;
+      }
+    }
+  }
+
   const taskPrompt = `Task: ${task.title}
 Description: ${task.description}
-Files to work on: ${task.files.join(", ")}
+Files to work on: ${task.files.join(", ")}${specialistContext}
 
 Please complete this task.`;
   
@@ -461,6 +483,40 @@ export async function main() {
       }
       break;
       
+    case "install": {
+      const home = process.env.HOME || "";
+      const claudeSkillsDir = join(home, ".claude", "skills");
+
+      // Find package root (where skills/ directory lives)
+      const packageRoot = dirname(dirname(new URL(import.meta.url).pathname));
+
+      const skills = [
+        { src: join(packageRoot, "skills", "bart-plan", "SKILL.md"), dest: join(claudeSkillsDir, "bart-plan.skill"), name: "bart-plan" },
+        { src: join(packageRoot, "SKILL.md"), dest: join(claudeSkillsDir, "bart-loop.skill"), name: "bart-loop" },
+      ];
+
+      mkdirSync(claudeSkillsDir, { recursive: true });
+
+      let installed = 0;
+      for (const skill of skills) {
+        if (!existsSync(skill.src)) {
+          console.log(`⚠️  Source not found: ${skill.src}`);
+          continue;
+        }
+        copyFileSync(skill.src, skill.dest);
+        console.log(`✅ Installed ${skill.name} → ${skill.dest}`);
+        installed++;
+      }
+
+      if (installed > 0) {
+        console.log(`\n🎉 ${installed} skill(s) installed to ${claudeSkillsDir}`);
+      } else {
+        console.error("\n❌ No skills found to install.");
+        process.exit(1);
+      }
+      break;
+    }
+
     case "init":
       console.log("Initializing Bart Loop...");
       if (!existsSync(join(cwd, TASKS_FILE))) {
@@ -476,6 +532,26 @@ export async function main() {
       await runPlanCommand(cwd, tasksPath, planPath, useLatestPlan, autoConfirm);
       break;
       
+    case "requirements":
+    case "reqs":
+      if (!existsSync(tasksPath)) {
+        console.error("No tasks.json found. Run 'bart plan' first.");
+        process.exit(1);
+      }
+      {
+        const reqTasks = readTasks(tasksPath);
+        const gapsOnly = args.includes("--gaps");
+        printRequirementsReport(reqTasks, gapsOnly);
+      }
+      break;
+
+    case "specialists":
+      {
+        const specialists = discoverSpecialists(cwd);
+        printSpecialists(specialists);
+      }
+      break;
+
     case "config":
       if (agentOverride) {
         const agent = agentOverride;
