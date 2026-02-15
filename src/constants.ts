@@ -7,7 +7,8 @@ export const BART = `
  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝  
 `;
 
-export const TASKS_FILE = ".bart/tasks.json";
+export const BART_DIR = ".bart";
+export const PLANS_DIR = ".bart/plans";
 export const PROMPT_TEMPLATE = ".bart/bart-prompt-template.md";
 
 export interface Task {

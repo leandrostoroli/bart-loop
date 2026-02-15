@@ -1,6 +1,6 @@
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "fs";
 import { join, dirname } from "path";
-import { Task, TasksData, Requirement } from "./constants.js";
+import { Task, TasksData, Requirement, BART_DIR } from "./constants.js";
 
 export function findFile(name: string, startDir: string): string | null {
   let dir = startDir;
@@ -61,6 +61,44 @@ export function depsMet(tasks: TasksData, taskId: string): boolean {
 
 export function getTaskById(tasks: TasksData, taskId: string): Task | undefined {
   return tasks.tasks.find(t => t.id === taskId);
+}
+
+/**
+ * Resolve the correct tasks.json path for a plan.
+ * - If planSlug provided, return `.bart/plans/<slug>/tasks.json`
+ * - If no slug, find the most recently modified `tasks.json` under `.bart/plans/` subdirs
+ * - Fallback to legacy `.bart/tasks.json`
+ */
+export function resolvePlanTasksPath(cwd: string, planSlug?: string): string {
+  if (planSlug) {
+    return join(cwd, ".bart", "plans", planSlug, "tasks.json");
+  }
+
+  // Auto-select latest tasks.json in .bart/plans/*/
+  const plansDir = join(cwd, ".bart", "plans");
+  if (existsSync(plansDir)) {
+    let latestTasksFile: { path: string; mtime: number } | null = null;
+    try {
+      const entries = readdirSync(plansDir);
+      for (const entry of entries) {
+        const tasksFile = join(plansDir, entry, "tasks.json");
+        if (existsSync(tasksFile)) {
+          const stats = statSync(tasksFile);
+          if (!latestTasksFile || stats.mtimeMs > latestTasksFile.mtime) {
+            latestTasksFile = { path: tasksFile, mtime: stats.mtimeMs };
+          }
+        }
+      }
+    } catch {}
+    if (latestTasksFile) {
+      return latestTasksFile.path;
+    }
+  }
+
+  // Fallback to legacy .bart/tasks.json
+  const legacyFile = join(BART_DIR, "tasks.json");
+  const legacyPath = findFile(legacyFile, cwd);
+  return legacyPath || join(cwd, legacyFile);
 }
 
 export function calculateCoverage(tasks: TasksData): Requirement[] {

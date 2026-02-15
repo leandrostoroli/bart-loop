@@ -1,34 +1,81 @@
 {
   "project": "bart-loop",
-  "plan_file": "./.bart/plan.md",
+  "plan_file": "./.bart/plans/2026-02-15-per-plan-task-isolation.md",
   "project_root": "/Users/leandrostoroli/github/bart-loop",
   "requirements": [
     {
-      "id": "REQ-CONTEXT",
-      "description": "Context",
-      "covered_by": [],
-      "status": "none"
-    },
-    {
-      "id": "REQ-CHANGES",
-      "description": "Changes",
+      "id": "REQ-01",
+      "description": "Each converted plan gets its own directory under .bart/plans/<slug>/",
       "covered_by": [
         "A1",
         "A2",
-        "A3"
+        "A3",
+        "B1",
+        "B2",
+        "B3",
+        "B4"
       ],
       "status": "none"
     },
     {
-      "id": "REQ-FILES-TO-MODIFY",
-      "description": "Files to modify",
-      "covered_by": [],
+      "id": "REQ-02",
+      "description": "Each plan directory contains both plan.md and tasks.json",
+      "covered_by": [
+        "A1",
+        "B2",
+        "B3",
+        "B4"
+      ],
       "status": "none"
     },
     {
-      "id": "REQ-VERIFICATION",
-      "description": "Verification",
-      "covered_by": [],
+      "id": "REQ-03",
+      "description": "bart plan writes tasks to the plan's own directory, not a global tasks.json",
+      "covered_by": [
+        "A1"
+      ],
+      "status": "none"
+    },
+    {
+      "id": "REQ-04",
+      "description": "bart run/status/dashboard can target a specific plan via --plan flag",
+      "covered_by": [
+        "A2",
+        "A3",
+        "B1"
+      ],
+      "status": "none"
+    },
+    {
+      "id": "REQ-05",
+      "description": "Without --plan, bart auto-selects the most recently modified plan",
+      "covered_by": [
+        "A1",
+        "A2",
+        "A3",
+        "B1"
+      ],
+      "status": "none"
+    },
+    {
+      "id": "REQ-06",
+      "description": "bart plans command lists all plans with status summaries",
+      "covered_by": [
+        "A3",
+        "B1",
+        "B2"
+      ],
+      "status": "none"
+    },
+    {
+      "id": "REQ-07",
+      "description": "Legacy .bart/tasks.json still works as fallback for backward compatibility",
+      "covered_by": [
+        "A1",
+        "A2",
+        "A3",
+        "B1"
+      ],
       "status": "none"
     }
   ],
@@ -36,63 +83,179 @@
     {
       "id": "A1",
       "workstream": "A",
-      "title": "1. Rewrite `skills/bart-plan/SKILL.md`",
-      "description": "1. Rewrite `skills/bart-plan/SKILL.md`. Transform from \"planner\" to \"converter\". The new workflow:",
+      "title": "Update runPlanCommand to write per-plan directories [REQ-01] [REQ-02] [REQ-03]",
+      "description": "Update runPlanCommand to write per-plan directories [REQ-01] [REQ-02] [REQ-03]. Change plan output from flat `.bart/plans/<date>-<slug>.md` to a directory structure: `.bart/plans/<date>-<slug>/plan.md` with a co-located `tasks.json`. Update `tasksData.plan_file` to point to the relative plan path within the directory.",
       "files": [
-        "skills/bart-plan/SKILL.md",
-        "/.claude"
+        "/plan.md",
+        "tasks.json",
+        "tasksData.plan_file",
+        "src/plan.ts",
+        "/tasks.json",
+        ".bart/tasks.json",
+        "plan.md"
       ],
       "depends_on": [],
       "status": "completed",
       "files_modified": [],
-      "started_at": "2026-02-15T19:10:52.773Z",
-      "completed_at": "2026-02-15T19:12:50.112Z",
+      "started_at": "2026-02-15T21:24:29.180Z",
+      "completed_at": "2026-02-15T21:26:03.362Z",
       "error": null,
       "requirements": [
-        "REQ-CHANGES"
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-05",
+        "REQ-07"
       ],
-      "specialist": "bart-plan"
+      "specialist": "make-plan"
     },
     {
       "id": "A2",
       "workstream": "A",
-      "title": "2. Add `bart convert` CLI alias in `src/cli.ts`",
-      "description": "2. Add `bart convert` CLI alias in `src/cli.ts`. Add a new case in the switch statement (~5 lines):",
+      "title": "Add resolvePlanTasksPath helper [REQ-05] [REQ-07]",
+      "description": "Add resolvePlanTasksPath helper [REQ-05] [REQ-07]. New function `resolvePlanTasksPath(cwd, planSlug?)` that resolves the correct tasks.json path. If planSlug provided, return `.bart/plans/<slug>/tasks.json`. If no slug, find the most recently modified `tasks.json` under `.bart/plans/*/`. Fallback to legacy `.bart/tasks.json`.",
       "files": [
-        "src/cli.ts",
-        "args.includes"
+        "tasks.json",
+        "/tasks.json",
+        ".bart/tasks.json",
+        "src/plan.ts",
+        "plan.md"
       ],
       "depends_on": [],
       "status": "completed",
       "files_modified": [],
-      "started_at": "2026-02-15T19:12:50.114Z",
-      "completed_at": "2026-02-15T19:13:28.663Z",
+      "started_at": "2026-02-15T21:26:03.363Z",
+      "completed_at": "2026-02-15T21:28:08.102Z",
       "error": null,
       "requirements": [
-        "REQ-CHANGES"
+        "REQ-05",
+        "REQ-07",
+        "REQ-01",
+        "REQ-04"
       ],
-      "specialist": "bart-plan"
+      "specialist": "plugin-validator"
     },
     {
       "id": "A3",
       "workstream": "A",
-      "title": "3. Update root `SKILL.md`",
-      "description": "3. Update root `SKILL.md`. Minor text update in the \"AI-Assisted Plan Creation\" section to reflect that bart-plan converts existing plans rather than creating from scratch.",
+      "title": "Update findLatestBartPlan to search subdirectories [REQ-01] [REQ-05]",
+      "description": "Update findLatestBartPlan to search subdirectories [REQ-01] [REQ-05]. Change `findLatestBartPlan()` to look for `plan.md` files inside `.bart/plans/*/` subdirectories instead of flat files in `.bart/plans/`.",
       "files": [
-        "SKILL.md",
-        "skills/bart-plan/SKILL.md",
+        "plan.md",
+        "src/plan.ts",
+        "/tasks.json",
+        "tasks.json",
+        ".bart/tasks.json",
         "src/cli.ts"
       ],
       "depends_on": [],
       "status": "completed",
       "files_modified": [],
-      "started_at": "2026-02-15T19:13:28.664Z",
-      "completed_at": "2026-02-15T19:13:51.554Z",
+      "started_at": "2026-02-15T21:28:08.103Z",
+      "completed_at": "2026-02-15T21:28:47.183Z",
       "error": null,
       "requirements": [
-        "REQ-CHANGES"
+        "REQ-01",
+        "REQ-05",
+        "REQ-04",
+        "REQ-07",
+        "REQ-06"
       ],
-      "specialist": "bart-plan"
+      "specialist": "claude-md-improver"
+    },
+    {
+      "id": "B1",
+      "workstream": "B",
+      "title": "Add --plan flag and update tasksPath resolution [REQ-04] [REQ-05] [REQ-07]",
+      "description": "Add --plan flag and update tasksPath resolution [REQ-04] [REQ-05] [REQ-07]. Add `planSlug` variable to CLI argument parsing. Update `tasksPath` determination in `main()` to follow priority: 1) `--tasks` flag (escape hatch), 2) `--plan <slug>` resolves to `.bart/plans/<slug>/tasks.json`, 3) auto-select latest `tasks.json` in `.bart/plans/*/`, 4) fallback to legacy `.bart/tasks.json`. Update help text for all commands.",
+      "files": [
+        "/tasks.json",
+        "tasks.json",
+        ".bart/tasks.json",
+        "src/cli.ts"
+      ],
+      "depends_on": [],
+      "status": "completed",
+      "files_modified": [],
+      "started_at": "2026-02-15T21:24:33.792Z",
+      "completed_at": "2026-02-15T21:27:32.455Z",
+      "error": null,
+      "requirements": [
+        "REQ-04",
+        "REQ-05",
+        "REQ-07",
+        "REQ-06",
+        "REQ-01"
+      ],
+      "specialist": "plugin-structure"
+    },
+    {
+      "id": "B2",
+      "workstream": "B",
+      "title": "Add bart plans command [REQ-06]",
+      "description": "Add bart plans command [REQ-06]. New `plans` command that lists all plan directories under `.bart/plans/` with status summary: plan name, task progress (X/Y done), workstreams, and date. Mark the most recent as active.",
+      "files": [
+        "src/cli.ts",
+        "src/constants.ts"
+      ],
+      "depends_on": [],
+      "status": "completed",
+      "files_modified": [],
+      "started_at": "2026-02-15T21:27:32.457Z",
+      "completed_at": "2026-02-15T21:28:22.432Z",
+      "error": null,
+      "requirements": [
+        "REQ-06",
+        "REQ-01",
+        "REQ-02"
+      ],
+      "specialist": "conversation-analyzer"
+    },
+    {
+      "id": "B3",
+      "workstream": "B",
+      "title": "Replace TASKS_FILE with BART_DIR and PLANS_DIR constants [REQ-01]",
+      "description": "Replace TASKS_FILE with BART_DIR and PLANS_DIR constants [REQ-01]. Remove the `TASKS_FILE` constant. Add `BART_DIR = \".bart\"` and `PLANS_DIR = \".bart/plans\"`. Update any imports that reference `TASKS_FILE`.",
+      "files": [
+        "src/constants.ts",
+        "src/cli.ts",
+        "/plan.md",
+        "tasks.json",
+        "skills/bart-plan/SKILL.md"
+      ],
+      "depends_on": [],
+      "status": "completed",
+      "files_modified": [],
+      "started_at": "2026-02-15T21:28:22.433Z",
+      "completed_at": "2026-02-15T21:29:48.861Z",
+      "error": null,
+      "requirements": [
+        "REQ-01",
+        "REQ-02"
+      ],
+      "specialist": "revise-claude-md"
+    },
+    {
+      "id": "B4",
+      "workstream": "B",
+      "title": "Update bart-plan skill Step 7 output path [REQ-01] [REQ-02]",
+      "description": "Update bart-plan skill Step 7 output path [REQ-01] [REQ-02]. Update the skill's write step to reflect the new directory structure: `.bart/plans/<YYYY-MM-DD>-<slug>/plan.md` (directory, not flat file). Clarify that tasks.json is generated separately by `bart plan`.",
+      "files": [
+        "/plan.md",
+        "tasks.json",
+        "skills/bart-plan/SKILL.md"
+      ],
+      "depends_on": [],
+      "status": "completed",
+      "files_modified": [],
+      "started_at": "2026-02-15T21:29:48.862Z",
+      "completed_at": "2026-02-15T21:30:12.784Z",
+      "error": null,
+      "requirements": [
+        "REQ-01",
+        "REQ-02"
+      ],
+      "specialist": "plugin-structure"
     }
   ]
 }

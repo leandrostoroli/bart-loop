@@ -27,7 +27,26 @@ function findLatestPlanInDirs(dirs: string[]): string | undefined {
 }
 
 export function findLatestBartPlan(cwd: string): string | undefined {
-  return findLatestPlanInDirs([join(cwd, ".bart", "plans")]);
+  const plansDir = join(cwd, ".bart", "plans");
+  if (!existsSync(plansDir)) return undefined;
+
+  let latestPlan: { path: string; mtime: number } | null = null;
+
+  try {
+    for (const entry of readdirSync(plansDir)) {
+      const entryPath = join(plansDir, entry);
+      if (!statSync(entryPath).isDirectory()) continue;
+      const planFile = join(entryPath, "plan.md");
+      if (existsSync(planFile)) {
+        const mtime = statSync(planFile).mtimeMs;
+        if (!latestPlan || mtime > latestPlan.mtime) {
+          latestPlan = { path: planFile, mtime };
+        }
+      }
+    }
+  } catch {}
+
+  return latestPlan?.path;
 }
 
 export function findLatestClaudePlan(cwd: string): string | undefined {
@@ -241,7 +260,7 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
   return { tasks, requirements };
 }
 
-export async function runPlanCommand(cwd: string, tasksPath: string, planPathArg?: string, useLatestPlan?: boolean, autoConfirm?: boolean) {
+export async function runPlanCommand(cwd: string, _tasksPath: string, planPathArg?: string, useLatestPlan?: boolean, autoConfirm?: boolean) {
   let planPath = planPathArg;
 
   if (!planPath && useLatestPlan) {
@@ -339,7 +358,6 @@ Example plan.md:
   }
 
   const bartPlansDir = join(cwd, ".bart", "plans");
-  mkdirSync(bartPlansDir, { recursive: true });
 
   // Derive a descriptive name from the plan's first heading or source filename
   const titleMatch = planContent.match(/^#\s+(?:Plan:\s*)?(.+)/m);
@@ -347,21 +365,26 @@ Example plan.md:
     ? titleMatch[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "").slice(0, 60)
     : "plan";
   const timestamp = new Date().toISOString().slice(0, 10);
-  const destPlanName = `${timestamp}-${slug}.md`;
-  const destPlanPath = join(bartPlansDir, destPlanName);
+  const planDirName = `${timestamp}-${slug}`;
+  const planDir = join(bartPlansDir, planDirName);
+  mkdirSync(planDir, { recursive: true });
+
+  const destPlanPath = join(planDir, "plan.md");
   writeFileSync(destPlanPath, planContent);
+
+  const planTasksPath = join(planDir, "tasks.json");
 
   const tasksData = {
     project: cwd.split("/").pop() || "project",
-    plan_file: `./.bart/plans/${destPlanName}`,
+    plan_file: `.bart/plans/${planDirName}/plan.md`,
     project_root: cwd,
     requirements: requirements.length > 0 ? requirements : undefined,
     tasks
   };
 
-  writeFileSync(tasksPath, JSON.stringify(tasksData, null, 2));
+  writeFileSync(planTasksPath, JSON.stringify(tasksData, null, 2));
 
-  console.log(`✅ Generated ${tasks.length} tasks in ${tasksPath}\n`);
+  console.log(`✅ Generated ${tasks.length} tasks in ${planTasksPath}\n`);
 
   const workstreams = [...new Set(tasks.map(t => t.workstream))].sort();
   console.log("Workstreams:");

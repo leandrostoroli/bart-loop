@@ -175,18 +175,22 @@ Before outputting the plan, verify:
 
 ## Step 7: Write and Confirm
 
-Save the converted plan to `.bart/plans/` with a descriptive filename:
+Save the converted plan into its own directory under `.bart/plans/`:
 
 ```
-.bart/plans/<YYYY-MM-DD>-<slug-from-title>.md
+.bart/plans/<YYYY-MM-DD>-<slug-from-title>/plan.md
 ```
 
-For example: `.bart/plans/2026-02-15-fix-dashboard-performance.md`
+For example: `.bart/plans/2026-02-15-fix-dashboard-performance/plan.md`
 
-The slug is derived from the plan's `# Plan: ...` title, lowercased and hyphenated. Then tell the user:
+The slug is derived from the plan's `# Plan: ...` title, lowercased and hyphenated. Create the directory if it doesn't exist, then write `plan.md` inside it. Do NOT write a flat `.md` file directly in `.bart/plans/`.
+
+Note: `tasks.json` is generated separately when the user runs `bart plan` — do not create it yourself. The `bart plan` command parses `plan.md` and produces a co-located `tasks.json` in the same directory.
+
+Then tell the user:
 
 ```
-Plan converted from [source] → .bart/plans/<filename>.md
+Plan converted from [source] → .bart/plans/<slug>/plan.md
 - X requirements derived
 - Y tasks across Z workstreams
 - Specialists used: [list or "none"]

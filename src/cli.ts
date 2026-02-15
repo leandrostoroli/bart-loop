@@ -1,8 +1,8 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync, statSync } from "fs";
 import { join, dirname } from "path";
 import { spawn } from "child_process";
-import { BART, TASKS_FILE } from "./constants.js";
-import { readTasks, findNextTask, getCwd, findFile, getTaskById } from "./tasks.js";
+import { BART, BART_DIR } from "./constants.js";
+import { readTasks, findNextTask, getCwd, getTaskById, resolvePlanTasksPath } from "./tasks.js";
 import { printStatus, printWorkstreamStatus, printRequirementsReport } from "./status.js";
 import { runDashboard } from "./dashboard.js";
 import { runPlanCommand } from "./plan.js";
@@ -36,6 +36,80 @@ function saveConfig(config: BartConfig) {
   } catch (e) {
     console.error("Failed to save config:", e);
   }
+}
+
+/**
+ * Resolve tasksPath with priority chain:
+ * 1) --tasks flag (explicit escape hatch)
+ * 2) --plan <slug> / auto-discover / legacy fallback (via resolvePlanTasksPath)
+ */
+function resolveTasksPath(cwd: string, tasksFlag?: string, planSlug?: string): string {
+  if (tasksFlag) {
+    return tasksFlag;
+  }
+  return resolvePlanTasksPath(cwd, planSlug);
+}
+
+/**
+ * List all available plans with their task status, workstreams, and date.
+ */
+function listPlans(cwd: string) {
+  const plansDir = join(cwd, ".bart", "plans");
+  if (!existsSync(plansDir)) {
+    console.log("No plans found. Run 'bart plan' to generate tasks from a plan.");
+    return;
+  }
+
+  const entries = readdirSync(plansDir).sort();
+  const plans: { slug: string; total: number; completed: number; workstreams: string[]; mtime: Date }[] = [];
+
+  for (const entry of entries) {
+    const entryPath = join(plansDir, entry);
+    try {
+      const stat = statSync(entryPath);
+      if (!stat.isDirectory()) continue;
+    } catch {
+      continue;
+    }
+
+    const tasksFile = join(entryPath, "tasks.json");
+    if (existsSync(tasksFile)) {
+      try {
+        const data = readTasks(tasksFile);
+        const total = data.tasks.length;
+        const completed = data.tasks.filter(t => t.status === "completed").length;
+        const workstreams = [...new Set(data.tasks.map(t => t.workstream).filter(Boolean))].sort();
+        const fstat = statSync(tasksFile);
+        plans.push({ slug: entry, total, completed, workstreams, mtime: fstat.mtime });
+      } catch {
+        plans.push({ slug: entry, total: 0, completed: 0, workstreams: [], mtime: new Date(0) });
+      }
+    }
+  }
+
+  if (plans.length === 0) {
+    console.log("No plan executions found. Run 'bart plan' to generate tasks from a plan.");
+    return;
+  }
+
+  // Sort by most recent first — first entry is active
+  plans.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+
+  console.log(`\n📋 Plans (${plans.length}):\n`);
+  for (let i = 0; i < plans.length; i++) {
+    const plan = plans[i];
+    const isActive = i === 0;
+    const pct = plan.total > 0 ? Math.round((plan.completed / plan.total) * 100) : 0;
+    const icon = pct === 100 ? "✅" : pct > 0 ? "🔄" : "⏳";
+    const activeTag = isActive ? " (active)" : "";
+    const date = plan.mtime.toLocaleDateString();
+    const ws = plan.workstreams.length > 0 ? plan.workstreams.join(", ") : "—";
+
+    console.log(`  ${icon} ${plan.slug}${activeTag}`);
+    console.log(`     Tasks: ${plan.completed}/${plan.total} done (${pct}%)  |  Workstreams: ${ws}  |  ${date}`);
+  }
+  console.log(`\nUse 'bart status --plan <slug>' to view a specific plan.`);
+  console.log(`Use 'bart run --plan <slug>' to run tasks for a specific plan.`);
 }
 
 async function detectAgent(): Promise<{ cmd: string; args: string[] }> {
@@ -74,13 +148,14 @@ Usage:
   bart                    Run next available task
   bart run [task-id]      Run a specific task
   bart status            Show task status
+  bart plans             List all plan executions
   bart dashboard         Launch TUI dashboard
   bart plan              Generate tasks from plan.md
   bart plan --latest     Generate tasks from latest plan (.bart/plans/ first, then Claude plans)
   bart plan --latest -y  Generate tasks from latest plan (skip confirmation)
   bart convert           Convert latest plan to bart tasks (checks .bart/plans/ first)
   bart convert <path>    Convert a specific plan file to bart tasks
-  bart plan --plan <path>  Generate tasks from custom plan file
+  bart plan --plan-file <path>  Generate tasks from custom plan file
   bart watch             Auto-refresh dashboard
   bart requirements      Show requirements coverage report
   bart requirements --gaps  Show only uncovered/partial requirements
@@ -94,22 +169,33 @@ Usage:
   bart --help            Show this help
 
 Options:
-  --tasks <path>         Path to tasks.json (default: ./tasks.json)
+  --tasks <path>         Path to tasks.json (escape hatch, overrides all resolution)
+  --plan <slug>          Select a plan execution by slug (e.g. --plan my-feature)
+  --plan-file <path>     Path to plan file for 'bart plan' command (default: ./plan.md)
   --workstream <id>      Filter by workstream
-  --plan <path>          Path to plan file (default: ./plan.md)
   --agent <name>         Agent to use (claude, opencode)
   --auto-continue        Auto-continue to next task (default: true)
   --no-auto-continue     Ask before continuing to next task
 
+Plan Resolution:
+  Tasks are resolved in this order:
+  1. --tasks <path>            Explicit path (escape hatch)
+  2. --plan <slug>             .bart/plans/<slug>/tasks.json
+  3. (auto)                    Latest tasks.json in .bart/plans/*/
+  4. (fallback)                Legacy .bart/tasks.json
+
 Examples:
-  bart                    # Run next task
-  bart status             # Show progress
-  bart dashboard          # Open TUI dashboard
-  bart plan               # Generate tasks from plan.md
-  bart run A1             # Run specific task
-  bart run --agent claude # Run with claude, auto-continue
-  bart run --no-auto-continue  # Ask before each task
-  bart config --agent claude   # Set default agent to claude
+  bart                           # Run next task (auto-selects latest plan)
+  bart status                    # Show progress for latest plan
+  bart plans                     # List all plan executions
+  bart status --plan my-feature  # Show progress for specific plan
+  bart run --plan my-feature     # Run tasks for specific plan
+  bart run A1                    # Run specific task
+  bart run --agent claude        # Run with claude, auto-continue
+  bart run --no-auto-continue    # Ask before each task
+  bart dashboard                 # Open TUI dashboard
+  bart plan                      # Generate tasks from plan.md
+  bart config --agent claude     # Set default agent to claude
   `);
 }
 
@@ -233,20 +319,17 @@ Please complete this task.`;
 export async function main() {
   const args = process.argv.slice(2);
   const cwd = getCwd();
-  
-  let tasksPath = findFile(TASKS_FILE, cwd);
-  if (!tasksPath) {
-    tasksPath = join(cwd, TASKS_FILE);
-  }
-  
+
   let command = args[0] || "status";
   let workstream: string | undefined;
   let specificTask: string | undefined;
-  let planPath: string | undefined;
+  let planFilePath: string | undefined;  // --plan-file <path> for 'bart plan' command
+  let planSlug: string | undefined;      // --plan <slug> for plan execution selection
+  let tasksFlag: string | undefined;     // --tasks <path> explicit escape hatch
   let agentOverride: string | undefined;
   let autoContinue: boolean | undefined;
   let notifyUrl: string | undefined;
-  
+
   const remainingArgs: string[] = [];
   let skipNext = false;
   for (let i = 0; i < args.length; i++) {
@@ -259,10 +342,13 @@ export async function main() {
       workstream = args[i + 1];
       skipNext = true;
     } else if (arg === "--tasks" && args[i + 1]) {
-      tasksPath = args[i + 1];
+      tasksFlag = args[i + 1];
       skipNext = true;
     } else if (arg === "--plan" && args[i + 1]) {
-      planPath = args[i + 1];
+      planSlug = args[i + 1];
+      skipNext = true;
+    } else if (arg === "--plan-file" && args[i + 1]) {
+      planFilePath = args[i + 1];
       skipNext = true;
     } else if ((arg === "--agent" || arg === "-a") && args[i + 1] && (args[i + 1] === "claude" || args[i + 1] === "opencode")) {
       agentOverride = args[i + 1];
@@ -276,9 +362,12 @@ export async function main() {
       remainingArgs.push(arg);
     }
   }
-  
+
   command = remainingArgs[0] || command;
   specificTask = remainingArgs[1];
+
+  // Resolve tasksPath using priority chain
+  const tasksPath = resolveTasksPath(cwd, tasksFlag, planSlug);
   
   switch (command) {
     case "status":
@@ -520,22 +609,26 @@ export async function main() {
 
     case "init":
       console.log("Initializing Bart Loop...");
-      if (!existsSync(join(cwd, TASKS_FILE))) {
+      if (!existsSync(join(cwd, BART_DIR, "tasks.json"))) {
         console.log("Created tasks.json template");
       }
       console.log("Bart Loop initialized!");
       break;
 
+    case "plans":
+      listPlans(cwd);
+      break;
+
     case "convert":
     case "c":
-      await runPlanCommand(cwd, tasksPath, planPath || specificTask, true, args.includes("-y") || args.includes("--yes"));
+      await runPlanCommand(cwd, tasksPath, planFilePath || specificTask, true, args.includes("-y") || args.includes("--yes"));
       break;
 
     case "plan":
     case "p":
       const useLatestPlan = args.includes("--latest") || args.includes("-l");
       const autoConfirm = args.includes("-y") || args.includes("--yes");
-      await runPlanCommand(cwd, tasksPath, planPath, useLatestPlan, autoConfirm);
+      await runPlanCommand(cwd, tasksPath, planFilePath, useLatestPlan, autoConfirm);
       break;
       
     case "requirements":
