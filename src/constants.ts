@@ -25,5 +25,8 @@ export interface Task {
 }
 
 export interface TasksData {
+  project?: string;
+  plan_file?: string;
+  project_root?: string;
   tasks: Task[];
 }

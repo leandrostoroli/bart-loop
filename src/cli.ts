@@ -1,11 +1,68 @@
-import { existsSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import { join, dirname } from "path";
 import { spawn } from "child_process";
 import { BART, TASKS_FILE } from "./constants.js";
 import { readTasks, findNextTask, getCwd, findFile, getTaskById } from "./tasks.js";
-import { printStatus } from "./status.js";
+import { printStatus, printWorkstreamStatus } from "./status.js";
 import { runDashboard } from "./dashboard.js";
 import { runPlanCommand } from "./plan.js";
+import { sendNotification, isNotificationConfigured } from "./notify.js";
+
+const CONFIG_DIR = join(process.env.HOME || "", ".bart");
+const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+
+interface BartConfig {
+  agent?: string;
+  auto_continue?: boolean;
+  notify_url?: string;
+}
+
+function loadConfig(): BartConfig {
+  try {
+    if (existsSync(CONFIG_FILE)) {
+      return JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+    }
+  } catch {}
+  return {};
+}
+
+function saveConfig(config: BartConfig) {
+  try {
+    if (!existsSync(CONFIG_DIR)) {
+      const { mkdirSync } = require("fs");
+      mkdirSync(CONFIG_DIR, { recursive: true });
+    }
+    writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  } catch (e) {
+    console.error("Failed to save config:", e);
+  }
+}
+
+async function detectAgent(): Promise<{ cmd: string; args: string[] }> {
+  const config = loadConfig();
+  
+  if (config.agent === "opencode") {
+    return { cmd: "opencode", args: ["run"] };
+  }
+  if (config.agent === "claude") {
+    return { cmd: "claude", args: ["-p"] };
+  }
+  
+  const { promisify } = require("util");
+  const exec = promisify(require("child_process").exec);
+  
+  try {
+    await exec("opencode --version", { stdio: "ignore" });
+    return { cmd: "opencode", args: ["run"] };
+  } catch {}
+  
+  try {
+    await exec("claude --version", { stdio: "ignore" });
+    return { cmd: "claude", args: ["-p"] };
+  } catch {}
+  
+  return { cmd: "claude", args: ["-p"] };
+}
 
 export function showHelp() {
   console.log(`
@@ -19,14 +76,24 @@ Usage:
   bart status            Show task status
   bart dashboard         Launch TUI dashboard
   bart plan              Generate tasks from plan.md
+  bart plan --latest     Generate tasks from latest Claude plan (prompts for confirmation)
+  bart plan --latest -y Generate tasks from latest Claude plan (skip confirmation)
+  bart plan --plan <path>  Generate tasks from custom plan file
   bart watch             Auto-refresh dashboard
   bart reset <task-id>   Reset task to pending
   bart init              Initialize bart in current project
+  bart config            Show current config
+  bart config --agent <name>  Set default agent (claude, opencode)
+  bart config --notify-url <url>  Set notification URL (iOS Shortcuts)
   bart --help            Show this help
 
 Options:
   --tasks <path>         Path to tasks.json (default: ./tasks.json)
   --workstream <id>      Filter by workstream
+  --plan <path>          Path to plan file (default: ./plan.md)
+  --agent <name>         Agent to use (claude, opencode)
+  --auto-continue        Auto-continue to next task (default: true)
+  --no-auto-continue     Ask before continuing to next task
 
 Examples:
   bart                    # Run next task
@@ -34,10 +101,13 @@ Examples:
   bart dashboard          # Open TUI dashboard
   bart plan               # Generate tasks from plan.md
   bart run A1             # Run specific task
+  bart run --agent claude # Run with claude, auto-continue
+  bart run --no-auto-continue  # Ask before each task
+  bart config --agent claude   # Set default agent to claude
   `);
 }
 
-export async function runAgent(taskId: string, tasksPath: string) {
+export async function runAgent(taskId: string, tasksPath: string, agentOverride?: string, autoContinue?: boolean) {
   const tasks = readTasks(tasksPath);
   const task = getTaskById(tasks, taskId);
   
@@ -46,18 +116,94 @@ export async function runAgent(taskId: string, tasksPath: string) {
     process.exit(1);
   }
   
+  const completedTasks = tasks.tasks.filter(t => t.status === "completed");
+  if (completedTasks.length > 0) {
+    console.log(`\n✅ Previously completed (${completedTasks.length}):`);
+    for (const t of completedTasks) {
+      console.log(`   ${t.id}: ${t.title}`);
+    }
+    console.log("");
+  }
+  
+  const projectRoot = tasks.project_root || process.cwd();
+  
   console.log(`\n🚀 Starting task: ${taskId} — ${task.title}\n`);
+  console.log(`📁 Working directory: ${projectRoot}\n`);
   
-  let agentCmd = "claude";
-  try {
-    spawn("opencode", ["--version"], { stdio: "ignore" }).on("close", (code) => {
-      if (code === 0) agentCmd = "opencode";
+  const tasksData = readTasks(tasksPath);
+  const taskIndex = tasksData.tasks.findIndex(t => t.id === taskId);
+  if (taskIndex !== -1) {
+    tasksData.tasks[taskIndex].status = "in_progress";
+    tasksData.tasks[taskIndex].started_at = new Date().toISOString();
+    writeFileSync(tasksPath, JSON.stringify(tasksData, null, 2));
+  }
+  
+  let agentConfig: { cmd: string; args: string[] };
+  if (agentOverride) {
+    agentConfig = agentOverride === "opencode" 
+      ? { cmd: "opencode", args: ["run", "--dangerously-skip-permissions"] }
+      : { cmd: "claude", args: ["-p", "--dangerously-skip-permissions"] };
+  } else {
+    agentConfig = await detectAgent();
+    if (agentConfig.cmd === "opencode") {
+      agentConfig.args = ["run", "--dangerously-skip-permissions"];
+    } else {
+      agentConfig.args = ["-p", "--dangerously-skip-permissions"];
+    }
+  }
+  
+  console.log(`🤖 Using agent: ${agentConfig.cmd}\n`);
+  
+  const taskPrompt = `Task: ${task.title}
+Description: ${task.description}
+Files to work on: ${task.files.join(", ")}
+
+Please complete this task.`;
+  
+  const args = [...agentConfig.args, taskPrompt];
+  
+  const child = spawn(agentConfig.cmd, args, {
+    cwd: projectRoot,
+    stdio: "inherit"
+  });
+  
+  await new Promise<void>((resolve) => {
+    child.on("close", (code) => {
+      if (code !== 0) {
+        console.error(`\n⚠️ Agent exited with code ${code}`);
+        process.exit(code || 1);
+      }
+      resolve();
     });
-  } catch {}
+  });
   
-  console.log(`Would run agent for task: ${task.title}`);
-  console.log(`Description: ${task.description}`);
-  console.log(`Files: ${task.files.join(", ")}`);
+  const finalTasksData = readTasks(tasksPath);
+  const finalTaskIndex = finalTasksData.tasks.findIndex(t => t.id === taskId);
+  if (finalTaskIndex !== -1) {
+    finalTasksData.tasks[finalTaskIndex].status = "completed";
+    finalTasksData.tasks[finalTaskIndex].completed_at = new Date().toISOString();
+    writeFileSync(tasksPath, JSON.stringify(finalTasksData, null, 2));
+    console.log(`\n✅ Task ${taskId} marked as completed`);
+  }
+  
+  const shouldAsk = autoContinue === false || (autoContinue === undefined && loadConfig().auto_continue === false);
+  
+  if (shouldAsk) {
+    const readline = require("readline").createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+    
+    return new Promise<boolean>((resolve) => {
+      readline.question("\n🤔 Continue with next task? (Y/n) ", (answer: string) => {
+        readline.close();
+        const shouldContinue = answer.trim().toLowerCase() !== "n";
+        resolve(shouldContinue);
+      });
+    });
+  }
+  
+  return true;
 }
 
 export async function main() {
@@ -72,17 +218,37 @@ export async function main() {
   let command = args[0] || "status";
   let workstream: string | undefined;
   let specificTask: string | undefined;
+  let planPath: string | undefined;
+  let agentOverride: string | undefined;
+  let autoContinue: boolean | undefined;
+  let notifyUrl: string | undefined;
   
   const remainingArgs: string[] = [];
+  let skipNext = false;
   for (let i = 0; i < args.length; i++) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
     const arg = args[i];
     if (arg === "--workstream" && args[i + 1]) {
       workstream = args[i + 1];
-      i++;
+      skipNext = true;
     } else if (arg === "--tasks" && args[i + 1]) {
       tasksPath = args[i + 1];
-      i++;
-    } else if (!arg.startsWith("-")) {
+      skipNext = true;
+    } else if (arg === "--plan" && args[i + 1]) {
+      planPath = args[i + 1];
+      skipNext = true;
+    } else if ((arg === "--agent" || arg === "-a") && args[i + 1] && (args[i + 1] === "claude" || args[i + 1] === "opencode")) {
+      agentOverride = args[i + 1];
+      skipNext = true;
+    } else if (arg === "--auto-continue" || arg === "--no-auto-continue") {
+      autoContinue = arg === "--auto-continue";
+    } else if (arg === "--notify-url" && args[i + 1]) {
+      notifyUrl = args[i + 1];
+      skipNext = true;
+    } else if (!arg.startsWith("-") || arg === "-a") {
       remainingArgs.push(arg);
     }
   }
@@ -94,7 +260,12 @@ export async function main() {
     case "status":
     case "s":
       if (existsSync(tasksPath)) {
-        printStatus(readTasks(tasksPath));
+        const tasks = readTasks(tasksPath);
+        if (workstream) {
+          printWorkstreamStatus(tasks, workstream);
+        } else {
+          printStatus(tasks);
+        }
       } else {
         console.log("No tasks.json found. Run 'bart init' to initialize.");
       }
@@ -121,20 +292,172 @@ export async function main() {
       
     case "run":
     case "r":
-      if (!specificTask) {
-        if (existsSync(tasksPath)) {
+      if (!existsSync(tasksPath)) {
+        console.log("No tasks.json found. Run 'bart init' first.");
+        process.exit(1);
+      }
+      
+      if (specificTask) {
+        await runAgent(specificTask, tasksPath, agentOverride, autoContinue);
+      } else {
+        let running = true;
+        let iterations = 0;
+        while (running) {
+          iterations++;
+          if (iterations > 100) {
+            console.log("\n⚠️ Safety limit reached (100 iterations). Stopping.");
+            break;
+          }
+          
           const tasks = readTasks(tasksPath);
           const next = findNextTask(tasks, workstream);
+          
           if (next) {
-            await runAgent(next, tasksPath);
+            console.log("\n" + "=".repeat(50));
+            console.log(`📋 Iteration ${iterations}: Running task ${next}`);
+            const shouldContinue = await runAgent(next, tasksPath, agentOverride, autoContinue);
+            
+            const tasksAfter = readTasks(tasksPath);
+            const currentTask = tasksAfter.tasks.find(t => t.id === next);
+            const ws = currentTask?.workstream;
+            
+            if (ws) {
+              const wsTasks = tasksAfter.tasks.filter(t => t.workstream === ws);
+              const completed = wsTasks.filter(t => t.status === "completed").length;
+              const total = wsTasks.length;
+              
+              if (completed === total) {
+                console.log(`\n🎉 Workstream ${ws} completed!`);
+                await sendNotification({
+                  name: ws,
+                  status: "completed",
+                  message: `Workstream ${ws} done ${completed} of ${total} tasks`
+                });
+              }
+            }
+            
+            if (!shouldContinue) {
+              console.log("→ User chose to stop after task completion");
+              running = false;
+            }
           } else {
-            console.log("No tasks available.");
+            const remaining = tasks.tasks.filter(t => 
+              t.status === "pending" && (!workstream || t.workstream === workstream)
+            );
+            
+            if (remaining.length > 0) {
+              console.log("\n⏳ Waiting for dependencies...");
+              
+              const depsFromOtherWs = new Set<string>();
+              
+              for (const t of remaining) {
+                const deps = t.depends_on || [];
+                if (deps.length > 0) {
+                  const depTasks = deps.map(depId => {
+                    const dep = tasks.tasks.find(task => task.id === depId);
+                    const ws = dep?.workstream || depId;
+                    const status = dep?.status || "unknown";
+                    const icon = status === "completed" ? "✓" : status === "in_progress" ? "◐" : "○";
+                    if (ws !== workstream && status !== "completed") {
+                      depsFromOtherWs.add(ws);
+                    }
+                    return `${icon} ${depId} (${ws})`;
+                  });
+                  console.log(`   ${t.id}: waiting on [${depTasks.join(", ")}]`);
+                } else {
+                  console.log(`   ${t.id}: ${t.title} (no dependencies, but blocked)`);
+                }
+              }
+              
+              if (depsFromOtherWs.size > 0) {
+                console.log(`\n⚠️  Waiting on tasks from workstream(s): ${[...depsFromOtherWs].join(", ")}`);
+                console.log("   These will NOT be auto-run. Either:");
+                console.log("   • Run 'bart run' without --workstream to run all workstreams");
+                console.log("   • Run 'bart run --workstream <X>' for each workstream in order");
+                console.log("   • Manually run the dependent tasks first");
+                
+                const depsList = [...depsFromOtherWs].join(", ");
+                await sendNotification({
+                  name: workstream || "unknown",
+                  status: "blocked",
+                  message: `Waiting on workstream ${depsList}`
+                });
+                
+                running = false;
+                continue;
+              }
+              
+              console.log("\n🔄 Checking every 5 seconds for dependency resolution...");
+              
+              let waited = 0;
+              while (waited < 120) {
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                waited += 5;
+                
+                const checkTasks = readTasks(tasksPath);
+                const checkNext = findNextTask(checkTasks, workstream);
+                
+                if (checkNext) {
+                  console.log("\n✅ Dependencies resolved! Continuing...");
+                  break;
+                }
+                
+                const newRemaining = checkTasks.tasks.filter(t => 
+                  t.status === "pending" && (!workstream || t.workstream === workstream)
+                );
+                
+                if (newRemaining.length === 0) {
+                  console.log("\n📋 No more pending tasks.");
+                  running = false;
+                  break;
+                }
+                
+                const inProgress = checkTasks.tasks.filter(t => t.status === "in_progress");
+                if (inProgress.length > 0) {
+                  console.log(`\n⏳ Waiting... (${waited}s) [${inProgress[0].id}: ${inProgress[0].title}]`);
+                } else {
+                  console.log(`\n⏳ Waiting... (${waited}s)`);
+                }
+              }
+              
+              if (waited >= 120) {
+                console.log("\n⏰ Timeout reached (2 minutes). Stopping.");
+                running = false;
+              }
+              continue;
+            } else {
+              const inThisWs = tasks.tasks.filter(t => t.workstream === workstream);
+              if (inThisWs.length > 0) {
+                const completed = inThisWs.filter(t => t.status === "completed").length;
+                console.log(`\n⚠️  No tasks can run in workstream ${workstream}`);
+                console.log(`   Completed: ${completed}/${inThisWs.length}`);
+                const pending = inThisWs.filter(t => t.status === "pending");
+                if (pending.length > 0) {
+                  console.log(`   Pending but blocked:`);
+                  for (const t of pending) {
+                    const deps = t.depends_on || [];
+                    if (deps.length > 0) {
+                      console.log(`     - ${t.id}: depends on ${deps.join(", ")}`);
+                    }
+                  }
+                }
+              } else {
+                console.log(`\n⚠️  No tasks found in workstream ${workstream}`);
+              }
+              running = false;
+            }
           }
-        } else {
-          console.log("No tasks.json found. Run 'bart init' first.");
         }
-      } else {
-        await runAgent(specificTask, tasksPath);
+        
+        const finalTasks = readTasks(tasksPath);
+        const allDone = finalTasks.tasks.every(t => 
+          !workstream || t.workstream === workstream ? t.status === "completed" : true
+        );
+        if (allDone) {
+          console.log("\n🎉 All tasks completed!");
+        } else {
+          console.log("\n📊 Run complete. Use 'bart status' to see progress.");
+        }
       }
       break;
       
@@ -148,7 +471,43 @@ export async function main() {
 
     case "plan":
     case "p":
-      await runPlanCommand(cwd, tasksPath);
+      const useLatestPlan = args.includes("--latest") || args.includes("-l");
+      const autoConfirm = args.includes("-y") || args.includes("--yes");
+      await runPlanCommand(cwd, tasksPath, planPath, useLatestPlan, autoConfirm);
+      break;
+      
+    case "config":
+      if (agentOverride) {
+        const agent = agentOverride;
+        if (agent !== "claude" && agent !== "opencode") {
+          console.error("Invalid agent. Use 'claude' or 'opencode'");
+          process.exit(1);
+        }
+        const config = loadConfig();
+        config.agent = agent;
+        saveConfig(config);
+        console.log(`✅ Default agent set to: ${agent}`);
+      } else if (autoContinue !== undefined) {
+        const config = loadConfig();
+        config.auto_continue = autoContinue;
+        saveConfig(config);
+        console.log(`✅ Auto-continue set to: ${autoContinue}`);
+      } else if (notifyUrl) {
+        const config = loadConfig();
+        config.notify_url = notifyUrl;
+        saveConfig(config);
+        console.log(`✅ Notification URL set`);
+        console.log(`   Format: ${notifyUrl}&input=...`);
+      } else {
+        const config = loadConfig();
+        console.log("\n📋 Current config:");
+        console.log(`   agent: ${config.agent || "(not set)"}`);
+        console.log(`   auto_continue: ${config.auto_continue !== undefined ? config.auto_continue : "(default: true)"}`);
+        console.log(`   notify_url: ${config.notify_url || "(not set)"}`);
+        console.log(`\nTo set agent: bart config --agent <claude|opencode>`);
+        console.log(`To set auto-continue: bart config --auto-continue (or --no-auto-continue)`);
+        console.log(`To set notify URL: bart config --notify-url "shortcuts://..."`);
+      }
       break;
       
     case "reset":
@@ -156,7 +515,22 @@ export async function main() {
         console.error("Usage: bart reset <task-id>");
         process.exit(1);
       }
-      console.log(`Would reset task ${specificTask}`);
+      if (!existsSync(tasksPath)) {
+        console.error("No tasks.json found.");
+        process.exit(1);
+      }
+      const resetTasks = readTasks(tasksPath);
+      const resetTaskIndex = resetTasks.tasks.findIndex(t => t.id === specificTask);
+      if (resetTaskIndex === -1) {
+        console.error(`Task ${specificTask} not found`);
+        process.exit(1);
+      }
+      resetTasks.tasks[resetTaskIndex].status = "pending";
+      resetTasks.tasks[resetTaskIndex].started_at = null;
+      resetTasks.tasks[resetTaskIndex].completed_at = null;
+      resetTasks.tasks[resetTaskIndex].error = null;
+      writeFileSync(tasksPath, JSON.stringify(resetTasks, null, 2));
+      console.log(`✅ Task ${specificTask} reset to pending`);
       break;
       
     case "help":

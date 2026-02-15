@@ -27,10 +27,14 @@
   "author": "Leandro Storoli",
   "license": "MIT",
   "dependencies": {
-    "@opentui/core": "^0.1.79"
+    "ink": "^6.7.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3"
   },
   "peerDependencies": {
     "typescript": "^5"

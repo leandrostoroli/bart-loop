@@ -1,7 +1,39 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { Task } from "./constants.js";
 import { findFile } from "./tasks.js";
+
+export function findLatestClaudePlan(cwd: string): string | undefined {
+  const claudePlansDir = join(process.env.HOME || "", ".claude", "plans");
+  const projectPlansDir = join(cwd, ".claude", "plans");
+  
+  const searchDirs = [];
+  if (existsSync(projectPlansDir)) {
+    searchDirs.push(projectPlansDir);
+  }
+  if (existsSync(claudePlansDir)) {
+    searchDirs.push(claudePlansDir);
+  }
+  
+  let latestPlan: { path: string; mtime: number } | null = null;
+  
+  for (const dir of searchDirs) {
+    try {
+      const files = readdirSync(dir);
+      for (const file of files) {
+        if (file.endsWith(".md")) {
+          const filePath = join(dir, file);
+          const stats = statSync(filePath);
+          if (!latestPlan || stats.mtimeMs > latestPlan.mtime) {
+            latestPlan = { path: filePath, mtime: stats.mtimeMs };
+          }
+        }
+      }
+    } catch {}
+  }
+  
+  return latestPlan?.path || undefined;
+}
 
 export function parsePlanToTasks(planContent: string, cwd: string): Task[] {
   const lines = planContent.split("\n");
@@ -111,8 +143,43 @@ export function parsePlanToTasks(planContent: string, cwd: string): Task[] {
   return tasks;
 }
 
-export async function runPlanCommand(cwd: string, tasksPath: string) {
-  const planPath = findFile("plan.md", cwd) || findFile("PLAN.md", cwd);
+export async function runPlanCommand(cwd: string, tasksPath: string, planPathArg?: string, useLatestPlan?: boolean, autoConfirm?: boolean) {
+  let planPath = planPathArg;
+  
+  if (!planPath && useLatestPlan) {
+    console.log("🔍 Searching for latest Claude plan...");
+    planPath = findLatestClaudePlan(cwd) || undefined;
+    if (planPath) {
+      console.log(`   Found: ${planPath}\n`);
+      
+      if (!autoConfirm) {
+        const readline = require("readline").createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
+        
+        const confirmed = await new Promise<boolean>((resolve) => {
+          readline.question("Use this plan? (Y/n) ", (answer: string) => {
+            readline.close();
+            resolve(answer.trim().toLowerCase() !== "n");
+          });
+        });
+        
+        if (!confirmed) {
+          console.log("Cancelled.");
+          return;
+        }
+      }
+    }
+  }
+  
+  if (!planPath) {
+    const foundPlan = findFile("plan.md", cwd) || findFile("PLAN.md", cwd);
+    planPath = foundPlan || undefined;
+  } else if (!existsSync(planPath)) {
+    console.error(`Plan file not found: ${planPath}`);
+    process.exit(1);
+  }
   
   if (!planPath) {
     console.log(`

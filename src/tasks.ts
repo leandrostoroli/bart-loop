@@ -31,11 +31,12 @@ export function getTaskField(tasks: TasksData, taskId: string, field: keyof Task
 }
 
 export function findNextTask(tasks: TasksData, workstream?: string): string | null {
-  const filtered = workstream
-    ? tasks.tasks.filter(t => t.workstream === workstream && t.status === "pending")
-    : tasks.tasks.filter(t => t.status === "pending");
-
-  for (const task of filtered) {
+  const pending = tasks.tasks.filter(t => t.status === "pending");
+  
+  for (const task of pending) {
+    if (workstream && task.workstream !== workstream) {
+      continue;
+    }
     const deps = task.depends_on || [];
     const allDepsMet = deps.every(depId => {
       const dep = tasks.tasks.find(t => t.id === depId);
