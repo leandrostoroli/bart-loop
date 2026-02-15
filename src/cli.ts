@@ -1,7 +1,7 @@
 import { existsSync } from "fs";
 import { join } from "path";
 import { spawn } from "child_process";
-import { BART_ASCII, TASKS_FILE } from "./constants.js";
+import { BART, TASKS_FILE } from "./constants.js";
 import { readTasks, findNextTask, getCwd, findFile, getTaskById } from "./tasks.js";
 import { printStatus } from "./status.js";
 import { runDashboard } from "./dashboard.js";
@@ -9,7 +9,7 @@ import { runPlanCommand } from "./plan.js";
 
 export function showHelp() {
   console.log(`
-${BART_ASCII}
+${BART}
 
 Automated task execution using Claude Code or OpenCode
 

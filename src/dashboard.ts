@@ -1,4 +1,4 @@
-import { BART_MINI, TasksData } from "./constants.js";
+import { BART, TasksData } from "./constants.js";
 import { readTasks, depsMet } from "./tasks.js";
 
 function getWorkstreams(tasks: TasksData): string[] {
@@ -67,7 +67,7 @@ export async function runDashboard(tasksPath: string) {
       
       const header = Box(
         { border: "rounded", borderStyle: { fg: "cyan" }, padding: { x: 1, y: 0 } },
-        Text({ content: `${BART_MINI}  Bart Loop  •  ${new Date().toLocaleTimeString()}  •  Ctrl+C to quit`, fg: "cyan", bold: true })
+        Text({ content: `${BART}  Bart Loop  •  ${new Date().toLocaleTimeString()}  •  Ctrl+C to quit`, fg: "cyan", bold: true })
       );
       
       const children: any[] = [header, Text({ content: "" }), Box({ flexDirection: "row", gap: 1 }, ...boxes)];
