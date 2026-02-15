@@ -77,7 +77,9 @@ Usage:
   bart dashboard         Launch TUI dashboard
   bart plan              Generate tasks from plan.md
   bart plan --latest     Generate tasks from latest Claude plan (prompts for confirmation)
-  bart plan --latest -y Generate tasks from latest Claude plan (skip confirmation)
+  bart plan --latest -y  Generate tasks from latest Claude plan (skip confirmation)
+  bart convert           Convert latest Claude plan to bart format (alias for plan --latest)
+  bart convert <path>    Convert a specific plan file to bart format
   bart plan --plan <path>  Generate tasks from custom plan file
   bart watch             Auto-refresh dashboard
   bart requirements      Show requirements coverage report
@@ -523,6 +525,11 @@ export async function main() {
         console.log("Created tasks.json template");
       }
       console.log("Bart Loop initialized!");
+      break;
+
+    case "convert":
+    case "c":
+      await runPlanCommand(cwd, tasksPath, planPath || specificTask, true, args.includes("-y") || args.includes("--yes"));
       break;
 
     case "plan":

@@ -1,116 +1,70 @@
-# Plan: Auto-Trigger Skill Installation for bart-plan
+# Refactor bart-plan skill: standalone planner → post-plan converter
 
 ## Context
 
-The `bart-plan` skill exists at `.claude/skills/bart-plan.skill` inside the bart-loop repo, but it's only available when Claude runs inside that directory. The user needs it globally available so any project can trigger it. This requires an install mechanism that copies the skill to `~/.claude/skills/` (and optionally to OpenCode/Gemini equivalents).
+The `bart-plan` skill currently acts as a standalone planner — it asks the user what to build, gathers requirements, and writes `plan.md` from scratch. This duplicates Claude's native planning ability.
 
-GSD solves this with a `bin/install.js` script that copies commands/agents to `~/.claude/`, `~/.config/opencode/`, and `~/.gemini/` with path replacement. Bart-loop needs a similar but simpler mechanism.
+The desired workflow is: **Claude plans naturally first** (via `/plan` or conversation), then the user triggers `/bart-plan` to **convert** that plan into bart-compatible format with `[REQ-XX]` tags, workstreams, specialist assignments, and file references.
 
----
+## Changes
 
-## What to Build
+### 1. Rewrite `skills/bart-plan/SKILL.md`
 
-### 1. Add `bart install` command
+Transform from "planner" to "converter". The new workflow:
 
-New CLI command in `src/cli.ts` that copies the skill to global directories:
+1. **Locate source plan** — Find the latest plan in `~/.claude/plans/`, or accept a path argument
+2. **Analyze** — Parse the freeform plan's structure, goals, files, and work items
+3. **Discover specialists** — Run `bart specialists` (same as today)
+4. **Derive requirements** — Extract `[REQ-XX]` requirements from the plan's goals/context
+5. **Structure** — Reorganize into bart workstreams with specialist tags and file refs
+6. **Validate** — Same checklist as today (coverage, specialist tags, ordering)
+7. **Write** — Output `plan.md` and confirm summary
 
-```bash
-bart install              # Install skill to detected runtimes (auto-detect claude/opencode)
-bart install --claude     # Install to ~/.claude/skills/ only
-bart install --opencode   # Install to ~/.config/opencode/skills/ only
-bart install --global     # Alias for default behavior (global install)
-```
+Key changes to the skill text:
+- Title: "Bart Plan Converter" (was "Bart Plan Creator")
+- Description triggers: add "convert a plan for bart", "convert this to bart format", "make this plan bart-compatible"
+- Remove Step 2 "Gather Requirements" (user already planned)
+- Add Step 1 "Locate source plan" and Step 2 "Analyze source plan"
+- Keep Format Reference, Parser Rules, Workstream Separation Rules, and Validation sections unchanged
+- Add a before/after conversion example showing freeform Claude plan → bart format
+- Include fallback: if no source plan found, tell user to plan first or provide a path
 
-**What it does:**
-1. Detects which runtimes are available (same `detectAgent()` logic already in cli.ts)
-2. Copies `.claude/skills/bart-plan.skill` → `~/.claude/skills/bart-plan.skill`
-3. For OpenCode: copies to `~/.config/opencode/skills/bart-plan.skill` (with path adjustments if needed)
-4. Prints confirmation with next steps
+### 2. Add `bart convert` CLI alias in `src/cli.ts`
 
-**Implementation in `src/cli.ts`:**
-- New `install` case in the switch statement
-- New `installSkill(runtime: string)` function that:
-  - Resolves the skill source path (relative to the bart-loop package)
-  - Creates the target directory (`~/.claude/skills/`) if it doesn't exist
-  - Copies the file
-  - Prints success message
-
-**Source path resolution:**
-The skill file lives in the bart-loop package at `.claude/skills/bart-plan.skill`. When installed globally via npm, the package is at `node_modules/bart-loop/`. The install function needs to find the skill relative to the package root:
+Add a new case in the switch statement (~5 lines):
 
 ```typescript
-import { fileURLToPath } from "url";
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const packageRoot = join(__dirname, ".."); // src/ -> package root
-const skillSource = join(packageRoot, ".claude", "skills", "bart-plan.skill");
+case "convert":
+case "c":
+  const convertLatest = true;
+  const convertAutoConfirm = args.includes("-y") || args.includes("--yes");
+  await runPlanCommand(cwd, tasksPath, planPath, convertLatest, convertAutoConfirm);
+  break;
 ```
 
-### 2. Postinstall hook in package.json
-
-Add an npm postinstall script so the skill gets installed automatically when the user runs `npm install -g bart-loop`:
-
-```json
-{
-  "scripts": {
-    "postinstall": "node scripts/postinstall.js"
-  }
-}
+Update `showHelp()` to include:
+```
+bart convert           Convert latest Claude plan to bart tasks
 ```
 
-**New file: `scripts/postinstall.js`**
-- Checks if `~/.claude/` exists (Claude Code is installed)
-- If yes: creates `~/.claude/skills/` and copies the skill file
-- If no: silently skips (user may not have Claude Code)
-- Checks if `~/.config/opencode/` exists for OpenCode
-- Prints a one-line message: `bart-plan skill installed to ~/.claude/skills/`
-- Never fails the install (wrapped in try/catch) — the skill is optional
+**Note:** The `"c"` alias currently doesn't conflict — there's no existing `c` shortcut.
 
-### 3. Update help text
+### 3. Update root `SKILL.md`
 
-Update `showHelp()` in `src/cli.ts` to include the new command:
+Minor text update in the "AI-Assisted Plan Creation" section to reflect that bart-plan converts existing plans rather than creating from scratch.
 
-```
-bart install           Install bart-plan skill globally (enables auto-trigger in Claude/OpenCode)
-```
+## Files to modify
 
-### 4. Move skill to a discoverable location in the package
+| File | Change |
+|------|--------|
+| `skills/bart-plan/SKILL.md` | Rewrite: planner → converter workflow |
+| `src/cli.ts` | Add `convert`/`c` command alias + help text |
+| `SKILL.md` | Update bart-plan reference text |
 
-Currently at `.claude/skills/bart-plan.skill`. This works for project-local usage but is hidden. Also add the skill to the package `files` field so it's included in the npm package:
-
-**`package.json`** — Add to `files` array (or ensure the `.claude` dir is included):
-```json
-{
-  "files": ["src/", ".claude/", "scripts/", "bart-prompt-template.md"]
-}
-```
-
----
-
-## Files to Modify
-
-| File | Changes |
-|------|---------|
-| `src/cli.ts` | Add `install` command case + `installSkill()` function; update `showHelp()` |
-| `package.json` | Add `postinstall` script; add `files` array to include `.claude/` and `scripts/` |
-
-## New Files
-
-| File | Purpose |
-|------|---------|
-| `scripts/postinstall.js` | Npm postinstall hook that auto-copies skill to `~/.claude/skills/` on global install |
-
-## Existing Files (no changes)
-
-| File | Notes |
-|------|-------|
-| `.claude/skills/bart-plan.skill` | Already exists, already correct — just needs to be copied to global location |
-
----
+No changes needed to: `src/plan.ts`, `src/specialists.ts`, `src/constants.ts`, `src/tasks.ts`
 
 ## Verification
 
-1. **Manual install**: Run `bart install` → verify `~/.claude/skills/bart-plan.skill` exists with correct content
-2. **npm global install**: Run `npm install -g .` from bart-loop root → verify postinstall copies the skill automatically
-3. **Auto-trigger**: Start a new Claude Code session in a different project → say "plan this project for bart" → verify Claude loads the bart-plan skill and follows its instructions
-4. **Idempotent**: Run `bart install` twice → no errors, file is overwritten cleanly
-5. **Missing runtime**: Remove `~/.claude/` temporarily → run `bart install` → verify it warns gracefully instead of crashing
+1. Read the rewritten `skills/bart-plan/SKILL.md` and confirm it describes a conversion workflow
+2. Run `bun run src/index.ts convert --help` or `bun run src/index.ts help` — confirm `convert` appears
+3. Run `bun run src/index.ts convert` — confirm it calls `runPlanCommand` with `useLatestPlan=true`

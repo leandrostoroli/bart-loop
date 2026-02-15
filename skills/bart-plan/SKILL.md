@@ -1,36 +1,69 @@
 ---
 name: bart-plan
 description: |
-  Use this skill when the user asks to "create a bart plan", "plan this project for bart",
+  Use this skill when the user asks to "convert a plan for bart", "convert this to bart format",
+  "make this plan bart-compatible", "create a bart plan", "plan this project for bart",
   "break this down into bart tasks", "create a plan for parallel execution",
   "plan workstreams", or wants to structure work for automated AI agent execution
   via bart-loop. Also activates when the user invokes /bart-plan.
-version: 1.0.0
+version: 2.0.0
 ---
 
-# Bart Plan Creator
+# Bart Plan Converter
 
-You are a project planner that produces plans optimized for **bart-loop** — an automated task execution system that runs AI agents in parallel across workstreams.
+You convert existing plans into **bart-loop** format — a structured `plan.md` that `bart plan` parses into tracked tasks with requirements coverage, specialist assignment, and dependency resolution.
 
-Your output is a `plan.md` file that `bart plan` parses into tracked tasks with requirements coverage, specialist assignment, and dependency resolution.
+**You are not a planner.** The user has already planned using Claude's native planning (`/plan`, conversation, or an external document). Your job is to locate that plan and restructure it into bart-compatible format.
 
 ## How It Works
 
-The user triggers this skill by saying "plan this project for bart", "create a bart plan", or invoking `/bart-plan`. You then:
+The user triggers this skill by saying "convert this plan for bart", "create a bart plan", or invoking `/bart-plan`. You then:
 
-1. **Discover specialists** — Run `bart specialists` to find available skills/agents/commands
-2. **Gather requirements** — Ask the user what they want built (or extract from their description)
-3. **Write the plan** — Produce a `plan.md` in bart-optimized format with requirements, workstreams, specialist tags, and file references
-4. **Validate** — Ensure full requirements coverage, correct specialist tags, and proper workstream ordering
-5. **Output** — Write `plan.md` and confirm the summary. The user then runs `bart plan` → `bart run`.
+1. **Locate source plan** — Find the latest Claude plan in `~/.claude/plans/` or the project's `.claude/plans/`, or accept a path argument
+2. **Analyze source plan** — Parse the freeform plan's structure, goals, files, and work items
+3. **Discover specialists** — Run `bart specialists` to find available skills/agents/commands
+4. **Derive requirements** — Extract `[REQ-XX]` requirements from the plan's goals and context
+5. **Structure** — Reorganize into bart workstreams with specialist tags and file references
+6. **Validate** — Ensure full requirements coverage, correct specialist tags, and proper workstream ordering
+7. **Write** — Output `plan.md` and confirm the summary. The user then runs `bart plan` → `bart run`.
 
 ## Input
 
 **Query**: $ARGUMENTS
 
-If no query provided, ask the user what they want to build.
+If a path is provided, use it as the source plan. Otherwise, search for the latest Claude plan.
 
-## Step 1: Discover Available Specialists
+## Step 1: Locate Source Plan
+
+Find the source plan to convert. Check in order:
+
+1. **Path argument** — If the user provided a file path, use it directly
+2. **Latest Claude plan** — Search `~/.claude/plans/` and `./.claude/plans/` for the most recently modified `.md` file
+3. **Project plan.md** — Check for an existing `plan.md` or `.bart/plan.md` in the project root
+
+If no source plan is found, tell the user:
+
+```
+No source plan found. Please either:
+1. Create a plan first using Claude's /plan command or in conversation
+2. Provide a path: /bart-plan path/to/your/plan.md
+```
+
+Do NOT proceed to gather requirements from scratch — that is Claude's job, not yours.
+
+## Step 2: Analyze Source Plan
+
+Read the source plan and extract:
+
+- **Goals / objectives** — What the plan aims to achieve (these become requirements)
+- **Work items** — Individual tasks, steps, or changes described (these become `###` tasks)
+- **File references** — Any files, paths, or directories mentioned (these become `Files:` lines)
+- **Dependencies** — Any ordering or sequencing implied between work items
+- **Technical context** — Stack, constraints, patterns mentioned
+
+Do not discard information. Every meaningful work item in the source plan should map to a task in the output.
+
+## Step 3: Discover Available Specialists
 
 Run this command to see what specialists (skills, agents, commands) are available in the user's environment:
 
@@ -40,17 +73,15 @@ bart specialists 2>/dev/null || echo "No specialists discovered"
 
 Note the specialist names — you'll use them as `[specialist-name]` tags on tasks. If none are found, skip specialist tagging entirely.
 
-## Step 2: Gather Requirements
+## Step 4: Derive Requirements
 
-Ask the user what they want to build. Probe for:
+Extract requirements from the source plan's goals, objectives, and context. Each requirement should be a concrete, verifiable outcome:
 
-- **Core functionality** — what must work when done
-- **Constraints** — tech stack, existing code, deadlines, integrations
-- **Quality expectations** — tests, docs, CI/CD, linting
+- Map high-level goals to `[REQ-XX]` identifiers
+- Keep requirements atomic — one testable thing per requirement
+- Ensure every work item from the source plan is covered by at least one requirement
 
-If the user already provided a detailed description, extract requirements from it directly rather than asking again.
-
-## Step 3: Write the Plan
+## Step 5: Structure into Bart Format
 
 The plan MUST follow this exact structure. The `bart plan` parser uses `##` headings as workstream boundaries and `###` headings as individual tasks.
 
@@ -115,7 +146,7 @@ Follow these rules when organizing tasks into `##` sections:
 
 7. **Specialist clustering** — Group tasks for the same specialist together when possible (all `[frontend]` tasks in one section, all `[backend]` in another) to enable one specialist per workstream.
 
-## Step 4: Validate Before Writing
+## Step 6: Validate Before Writing
 
 Before outputting the plan, verify:
 
@@ -125,14 +156,15 @@ Before outputting the plan, verify:
 - [ ] Specialist tags (if used) match discovered specialist names — warn if using unknown tags
 - [ ] Each section has 3-5 tasks (split or merge if needed)
 - [ ] File paths are realistic and specific (not generic placeholders)
+- [ ] Every work item from the source plan is represented in the output
 
-## Step 5: Write and Confirm
+## Step 7: Write and Confirm
 
-Write the plan to `plan.md` in the project root. Then tell the user:
+Write the plan to `plan.md` in the project root (or `.bart/plan.md` if `.bart/` exists). Then tell the user:
 
 ```
-Plan written to plan.md with:
-- X requirements defined
+Plan converted from [source] to plan.md with:
+- X requirements derived
 - Y tasks across Z workstreams
 - Specialists used: [list or "none"]
 - Coverage: all requirements mapped / N uncovered
@@ -140,65 +172,64 @@ Plan written to plan.md with:
 Next: run `bart plan` to generate tasks, then `bart run` to execute.
 ```
 
-## Example Output
+## Conversion Example
 
-Here is a complete example of a well-formed bart plan:
+### Before: Freeform Claude Plan
 
 ```markdown
-# Plan: E-commerce API
+# Fix dashboard performance
 
-## Requirements
-- [REQ-01] Users can register and authenticate
-- [REQ-02] Products can be listed with pagination
-- [REQ-03] Shopping cart persists across sessions
-- [REQ-04] Checkout processes payments via Stripe
-- [REQ-05] Admin dashboard shows order metrics
-- [REQ-06] All endpoints have integration tests
+## Context
+The dashboard page loads slowly due to unoptimized API calls and missing caching.
+Users report 5-8 second load times. Target is under 2 seconds.
 
-## Foundation
-### Initialize project structure [REQ-01] [REQ-02]
-Set up Node.js project with TypeScript, ESLint, and Prisma ORM.
-Files: package.json, tsconfig.json, prisma/schema.prisma, .eslintrc.json
+## Root Cause
+1. The Overview component makes 6 sequential API calls that could be parallelized
+2. No client-side caching — every navigation re-fetches all data
+3. The metrics chart re-renders on every state change due to missing memoization
 
-### Configure CI pipeline [REQ-06]
-GitHub Actions workflow for lint, type-check, and test on PR.
-Files: .github/workflows/ci.yml
+## Fix
+- Refactor API calls in `src/pages/Overview.tsx` to use `Promise.all`
+- Add React Query for data caching in `src/providers/QueryProvider.tsx`
+- Memoize chart component with `React.memo` and `useMemo` for computed data
+- Add loading skeletons to improve perceived performance
 
-## Authentication
-### [backend] Build registration and login API [REQ-01]
-JWT-based auth with email/password. Bcrypt for password hashing.
-Files: src/auth/register.ts, src/auth/login.ts, src/auth/middleware.ts
-
-### [backend] Add session management [REQ-01] [REQ-03]
-Redis-backed sessions for cart persistence across logins.
-Files: src/auth/session.ts, src/config/redis.ts
-
-## Product Catalog
-### [backend] Create product CRUD endpoints [REQ-02]
-REST endpoints for products with cursor-based pagination.
-Files: src/products/routes.ts, src/products/service.ts
-
-### [backend] Add product search and filtering [REQ-02]
-Full-text search with category and price range filters.
-Files: src/products/search.ts, src/products/filters.ts
-
-## Cart & Checkout
-### [backend] Implement shopping cart API [REQ-03]
-Cart stored in Redis with product validation against catalog.
-Files: src/cart/routes.ts, src/cart/service.ts
-
-### [backend] Integrate Stripe checkout [REQ-04]
-Payment intent creation, webhook handling, order confirmation.
-Files: src/checkout/stripe.ts, src/checkout/webhooks.ts, src/checkout/orders.ts
-
-## Admin & Testing
-### [frontend] Build admin metrics dashboard [REQ-05]
-React dashboard showing orders, revenue, and product stats.
-Files: src/admin/Dashboard.tsx, src/admin/MetricsPanel.tsx
-
-### Write integration tests [REQ-06] [REQ-01] [REQ-02] [REQ-04]
-Test auth flow, product listing, and checkout end-to-end.
-Files: tests/auth.test.ts, tests/products.test.ts, tests/checkout.test.ts
+## Verification
+- Lighthouse performance score > 90
+- Dashboard loads in under 2 seconds on throttled 3G
 ```
 
-This produces 10 tasks across 5 workstreams (A-E) with full requirements coverage and specialist routing.
+### After: Bart-Compatible Plan
+
+```markdown
+# Plan: Fix Dashboard Performance
+
+## Requirements
+- [REQ-01] Dashboard loads in under 2 seconds
+- [REQ-02] API calls are parallelized, not sequential
+- [REQ-03] Client-side caching prevents redundant fetches
+- [REQ-04] Chart component does not re-render unnecessarily
+
+## API & Caching
+### Parallelize API calls in Overview [REQ-01] [REQ-02]
+Refactor the 6 sequential API calls in Overview to use Promise.all for parallel fetching.
+Files: src/pages/Overview.tsx
+
+### Add React Query provider for data caching [REQ-03]
+Set up React Query with appropriate stale times to cache dashboard data across navigations.
+Files: src/providers/QueryProvider.tsx, src/main.tsx
+
+## Rendering & UX
+### [frontend] Memoize chart component [REQ-04]
+Wrap chart with React.memo and use useMemo for computed data to prevent unnecessary re-renders.
+Files: src/components/MetricsChart.tsx
+
+### [frontend] Add loading skeletons [REQ-01]
+Add skeleton placeholders for dashboard panels to improve perceived performance during data fetch.
+Files: src/pages/Overview.tsx, src/components/Skeleton.tsx
+
+## Verification
+### Run Lighthouse performance audit [REQ-01]
+Verify Lighthouse performance score exceeds 90 and load time is under 2 seconds on throttled 3G.
+Files: tests/performance.test.ts
+```
