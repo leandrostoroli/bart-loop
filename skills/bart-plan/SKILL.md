@@ -11,7 +11,7 @@ description: |
   "break this down into bart tasks", "create a plan for parallel execution",
   "plan workstreams", or wants to structure work for automated AI agent execution
   via bart-loop. Also activates when the user invokes /bart-plan.
-version: 3.0.0
+version: 4.0.0
 ---
 
 # Bart Plan Converter
@@ -28,7 +28,7 @@ This skill auto-triggers as a **pre-implementation hook** when:
 
 **Timing is critical:** Run this skill BEFORE presenting the plan for implementation. The user expects bart-plan to catch every plan automatically so they can dismiss Claude's "shall I implement?" prompt — the plan is already saved in `.bart/plans/` for `bart run` to execute later.
 
-When auto-triggered, skip asking the user — proceed directly with conversion using the plan that was just created.
+When auto-triggered, skip asking the user for plan source — proceed directly with conversion using the plan that was just created. However, **always pause at Step 3c** to confirm skill/agent assignments with the user before writing the final plan.
 
 ## How It Works
 
@@ -36,9 +36,9 @@ The user triggers this skill manually or it auto-triggers before plan implementa
 
 1. **Locate source plan** — Find the plan just created in `.claude/plans/` or `~/.claude/plans/`, or accept a path argument
 2. **Analyze source plan** — Parse the freeform plan's structure, goals, files, and work items
-3. **Discover specialists** — Run `bart specialists` to find available skills/agents/commands
+3. **Discover skills & propose assignments** — Find local specialists + search `find-skills` if installed, propose skill/agent per task, ask user to confirm
 4. **Derive requirements** — Extract `[REQ-XX]` requirements from the plan's goals and context
-5. **Structure** — Reorganize into bart workstreams with specialist tags and file references
+5. **Structure** — Reorganize into bart workstreams with confirmed specialist tags and file references
 6. **Validate** — Ensure full requirements coverage, correct specialist tags, and proper workstream ordering
 7. **Write** — Save to `.bart/plans/<date>-<slug>.md` and confirm. The user then runs `bart plan` → `bart run`.
 
@@ -78,15 +78,71 @@ Read the source plan and extract:
 
 Do not discard information. Every meaningful work item in the source plan should map to a task in the output.
 
-## Step 3: Discover Available Specialists
+## Step 3: Discover Skills & Propose Assignments
 
-Run this command to see what specialists (skills, agents, commands) are available in the user's environment:
+For each task, determine the best skill or agent to execute it. This is a critical step — the right specialist assignment directly impacts execution quality.
 
+### 3a. Discover available skills
+
+First, collect all available skills/agents/commands from two sources:
+
+**Local specialists** — always check:
 ```bash
-bart specialists 2>/dev/null || echo "No specialists discovered"
+bart specialists 2>/dev/null || echo "No local specialists discovered"
 ```
 
-Note the specialist names — you'll use them as `[specialist-name]` tags on tasks. If none are found, skip specialist tagging entirely.
+**Remote skill search** — check if `find-skills` is installed:
+```bash
+claude -p "Use the find-skills skill to search for: test" 2>/dev/null | head -5
+```
+
+If `find-skills` responds with skill results, it's available. If it errors or is not recognized, skip remote search and rely on local specialists only.
+
+### 3b. Analyze each task and propose a skill/agent
+
+For every task extracted from the source plan:
+
+1. **Look at the task context** — what is the task doing? (writing code, running tests, deploying, configuring, designing, documenting, etc.)
+2. **Check local specialists first** — is there a local skill/agent/command that matches this task's domain?
+3. **Search remotely if needed** — if no strong local match exists AND `find-skills` is available, search for a relevant skill:
+   ```
+   Use the find-skills skill to search for: <task domain keywords>
+   ```
+4. **Fall back to default** — if no specialist matches, leave the task untagged (it will run with the default claude/opencode agent)
+
+### 3c. Present assignments and ask for confirmation
+
+Before proceeding, present the user with a summary table of proposed assignments:
+
+```
+Proposed skill/agent assignments:
+
+  Task                              | Proposed Skill/Agent     | Confidence
+  ----------------------------------|--------------------------|------------
+  Initialize project config         | (default agent)          | —
+  Build REST API endpoints          | backend-developer        | High
+  Create React dashboard            | frontend                 | High
+  Write integration tests           | test-runner              | Medium
+  Set up CI pipeline                | ?                        | Low
+
+Tasks marked "?" or "Low" confidence — I'm not sure which skill fits best.
+```
+
+**Ask refinement questions when confidence is low or medium:**
+
+- "Task X involves both database migrations and API changes — should I use `backend-developer` or split it into two tasks?"
+- "I found a remote skill `vercel-deploy` that could handle Task Y — should I use it, or keep the default agent?"
+- "Task Z is ambiguous — it could be handled by `frontend` (UI work) or `test-runner` (component tests). Which fits better?"
+
+**Wait for the user to confirm or adjust assignments before proceeding to Step 4.** The user may:
+- Approve all assignments as-is
+- Override specific assignments
+- Ask you to search for additional skills
+- Decide to split or merge tasks based on specialist availability
+
+### 3d. Apply confirmed assignments
+
+After user confirmation, use the confirmed specialist names as `[specialist-name]` tags in the `###` task headings. Tasks with no specialist assignment get no tag.
 
 ## Step 4: Derive Requirements
 

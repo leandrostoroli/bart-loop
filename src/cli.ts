@@ -645,13 +645,23 @@ export async function main() {
       break;
     }
 
-    case "init":
+    case "init": {
       console.log("Initializing Bart Loop...");
-      if (!existsSync(join(cwd, BART_DIR, "tasks.json"))) {
-        console.log("Created tasks.json template");
+      const bartDir = join(cwd, BART_DIR);
+      const plansDir = join(cwd, BART_DIR, "plans");
+      if (!existsSync(bartDir)) {
+        mkdirSync(bartDir, { recursive: true });
+        console.log(`Created ${BART_DIR}/`);
+      } else {
+        console.log(`${BART_DIR}/ already exists`);
+      }
+      if (!existsSync(plansDir)) {
+        mkdirSync(plansDir, { recursive: true });
+        console.log(`Created ${BART_DIR}/plans/`);
       }
       console.log("Bart Loop initialized!");
       break;
+    }
 
     case "plans":
       listPlans(cwd);
