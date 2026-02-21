@@ -6,8 +6,8 @@ import { readTasks, findNextTask, getCwd, getTaskById, resolvePlanTasksPath } fr
 import { printStatus, printWorkstreamStatus, printRequirementsReport } from "./status.js";
 import { runDashboard } from "./dashboard.js";
 import { runPlanCommand } from "./plan.js";
-import { sendNotification, isNotificationConfigured } from "./notify.js";
-import { discoverSpecialists, printSpecialists, parseFrontmatter, appendHistory, extractPlanSlug, countResetsForTask, printSpecialistHistory } from "./specialists.js";
+import { sendTelegram, sendTelegramTestMessage, formatTaskCompleted, formatTaskError, formatCriticalError, formatWorkstreamCompleted, formatWorkstreamBlocked, formatMilestone } from "./notify.js";
+import { discoverSpecialists, printSpecialists, parseFrontmatter, appendHistory, extractPlanSlug, countResetsForTask, countWorkstreamErrors, printSpecialistHistory } from "./specialists.js";
 import { generateZshCompletion, generateBashCompletion, installCompletions } from "./completions.js";
 
 const CONFIG_DIR = join(process.env.HOME || "", ".bart");
@@ -16,7 +16,8 @@ const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 interface BartConfig {
   agent?: string;
   auto_continue?: boolean;
-  notify_url?: string;
+  telegram_bot_token?: string;
+  telegram_chat_id?: string;
 }
 
 function loadConfig(): BartConfig {
@@ -172,7 +173,7 @@ Usage:
   bart init              Initialize bart in current project
   bart config            Show current config
   bart config --agent <name>  Set default agent (claude, opencode)
-  bart config --notify-url <url>  Set notification URL (iOS Shortcuts)
+  bart config --telegram         Setup Telegram notifications
   bart --help            Show this help
 
 Options:
@@ -206,7 +207,9 @@ Examples:
   `);
 }
 
-export async function runAgent(taskId: string, tasksPath: string, agentOverride?: string, autoContinue?: boolean) {
+const MILESTONE_THRESHOLDS = [25, 50, 80, 100] as const;
+
+export async function runAgent(taskId: string, tasksPath: string, agentOverride?: string, autoContinue?: boolean, firedMilestones?: Set<number>) {
   const tasks = readTasks(tasksPath);
   const task = getTaskById(tasks, taskId);
   
@@ -284,41 +287,67 @@ Please complete this task.`;
     stdio: "inherit"
   });
   
-  await new Promise<void>((resolve) => {
+  const exitCode = await new Promise<number | null>((resolve) => {
     child.on("close", (code) => {
-      if (code !== 0) {
-        console.error(`\n⚠️ Agent exited with code ${code}`);
-
-        // Log error to history and update task status
-        const errTasksData = readTasks(tasksPath);
-        const errTaskIndex = errTasksData.tasks.findIndex(t => t.id === taskId);
-        if (errTaskIndex !== -1) {
-          errTasksData.tasks[errTaskIndex].status = "error";
-          errTasksData.tasks[errTaskIndex].error = `Agent exited with code ${code}`;
-          writeFileSync(tasksPath, JSON.stringify(errTasksData, null, 2));
-
-          const errTask = errTasksData.tasks[errTaskIndex];
-          const planSlug = extractPlanSlug(tasksPath);
-          appendHistory(projectRoot, {
-            timestamp: new Date().toISOString(),
-            event: "error",
-            task_id: taskId,
-            plan_slug: planSlug,
-            specialist: errTask.specialist || null,
-            status: "error",
-            duration_ms: errTask.started_at ? Date.now() - new Date(errTask.started_at).getTime() : null,
-            resets: countResetsForTask(projectRoot, taskId, planSlug),
-            files: errTask.files,
-            workstream: errTask.workstream,
-            title: errTask.title,
-          });
-        }
-
-        process.exit(code || 1);
-      }
-      resolve();
+      resolve(code);
+    });
+    child.on("error", (err) => {
+      console.error(`\n❌ Failed to start agent: ${err.message}`);
+      resolve(1);
     });
   });
+
+  if (exitCode !== 0) {
+    console.error(`\n⚠️ Agent exited with code ${exitCode}`);
+
+    // Log error to history and update task status
+    const errTasksData = readTasks(tasksPath);
+    const errTaskIndex = errTasksData.tasks.findIndex(t => t.id === taskId);
+    if (errTaskIndex !== -1) {
+      errTasksData.tasks[errTaskIndex].status = "error";
+      errTasksData.tasks[errTaskIndex].error = `Agent exited with code ${exitCode}`;
+      writeFileSync(tasksPath, JSON.stringify(errTasksData, null, 2));
+
+      const errTask = errTasksData.tasks[errTaskIndex];
+      const planSlug = extractPlanSlug(tasksPath);
+      const resets = countResetsForTask(projectRoot, taskId, planSlug);
+      appendHistory(projectRoot, {
+        timestamp: new Date().toISOString(),
+        event: "error",
+        task_id: taskId,
+        plan_slug: planSlug,
+        specialist: errTask.specialist || null,
+        status: "error",
+        duration_ms: errTask.started_at ? Date.now() - new Date(errTask.started_at).getTime() : null,
+        resets,
+        files: errTask.files,
+        workstream: errTask.workstream,
+        title: errTask.title,
+      });
+
+      // Send error notification [REQ-05]
+      await sendTelegram(formatTaskError(errTask, resets + 1));
+
+      // Critical error detection [REQ-06]:
+      // Trigger if same task failed 3+ times OR 3+ distinct tasks errored in this workstream
+      const sameTaskFailures = resets + 1; // resets count + current error
+      const wsErrors = countWorkstreamErrors(projectRoot, errTask.workstream, planSlug);
+      if (sameTaskFailures >= 3) {
+        await sendTelegram(formatCriticalError(
+          `Task ${errTask.id} has failed ${sameTaskFailures} times.\n` +
+          `Workstream: ${errTask.workstream}\n` +
+          `Task: ${errTask.title}`
+        ));
+      } else if (wsErrors >= 3) {
+        await sendTelegram(formatCriticalError(
+          `${wsErrors} distinct tasks have errored in workstream ${errTask.workstream}.\n` +
+          `Latest failure: ${errTask.id} — ${errTask.title}`
+        ));
+      }
+    }
+
+    process.exit(exitCode || 1);
+  }
   
   const finalTasksData = readTasks(tasksPath);
   const finalTaskIndex = finalTasksData.tasks.findIndex(t => t.id === taskId);
@@ -343,8 +372,40 @@ Please complete this task.`;
       workstream: completedTask.workstream,
       title: completedTask.title,
     });
+
+    await sendTelegram(formatTaskCompleted(completedTask));
+
+    // Milestone check: right after task completion, check if we crossed a threshold
+    const milestoneTotal = finalTasksData.tasks.length;
+    const milestoneCompleted = finalTasksData.tasks.filter(t => t.status === "completed").length;
+    if (milestoneTotal > 0) {
+      const pct = Math.round((milestoneCompleted / milestoneTotal) * 100);
+      // Seed firedMilestones on first use (single-task execution)
+      if (!firedMilestones) {
+        firedMilestones = new Set<number>();
+        // Seed with thresholds already passed before this task
+        const prevPct = Math.round((Math.max(0, milestoneCompleted - 1) / milestoneTotal) * 100);
+        for (const threshold of MILESTONE_THRESHOLDS) {
+          if (prevPct >= threshold) {
+            firedMilestones.add(threshold);
+          }
+        }
+      }
+      for (const threshold of MILESTONE_THRESHOLDS) {
+        if (pct >= threshold && !firedMilestones.has(threshold)) {
+          firedMilestones.add(threshold);
+          const activeWs = [...new Set(
+            finalTasksData.tasks
+              .filter(t => t.status === "in_progress" || t.status === "pending")
+              .map(t => t.workstream)
+              .filter(Boolean)
+          )];
+          await sendTelegram(formatMilestone(threshold, milestoneCompleted, milestoneTotal, activeWs));
+        }
+      }
+    }
   }
-  
+
   const shouldAsk = autoContinue === false || (autoContinue === undefined && loadConfig().auto_continue === false);
   
   if (shouldAsk) {
@@ -377,7 +438,7 @@ export async function main() {
   let tasksFlag: string | undefined;     // --tasks <path> explicit escape hatch
   let agentOverride: string | undefined;
   let autoContinue: boolean | undefined;
-  let notifyUrl: string | undefined;
+  let telegramSetup = false;
   let showHistory = false;
 
   const remainingArgs: string[] = [];
@@ -407,9 +468,8 @@ export async function main() {
       autoContinue = arg === "--auto-continue";
     } else if (arg === "--history") {
       showHistory = true;
-    } else if (arg === "--notify-url" && args[i + 1]) {
-      notifyUrl = args[i + 1];
-      skipNext = true;
+    } else if (arg === "--telegram") {
+      telegramSetup = true;
     } else if (!arg.startsWith("-") || arg === "-a") {
       remainingArgs.push(arg);
     }
@@ -467,6 +527,21 @@ export async function main() {
       } else {
         let running = true;
         let iterations = 0;
+        // Seed milestones already passed before this execution started [REQ-08]
+        const firedMilestones = new Set<number>();
+        {
+          const initialTasks = readTasks(tasksPath);
+          const initCompleted = initialTasks.tasks.filter(t => t.status === "completed").length;
+          const initTotal = initialTasks.tasks.length;
+          if (initTotal > 0) {
+            const initPct = Math.round((initCompleted / initTotal) * 100);
+            for (const threshold of MILESTONE_THRESHOLDS) {
+              if (initPct >= threshold) {
+                firedMilestones.add(threshold);
+              }
+            }
+          }
+        }
         while (running) {
           iterations++;
           if (iterations > 100) {
@@ -480,27 +555,23 @@ export async function main() {
           if (next) {
             console.log("\n" + "=".repeat(50));
             console.log(`📋 Iteration ${iterations}: Running task ${next}`);
-            const shouldContinue = await runAgent(next, tasksPath, agentOverride, autoContinue);
-            
+            const shouldContinue = await runAgent(next, tasksPath, agentOverride, autoContinue, firedMilestones);
+
             const tasksAfter = readTasks(tasksPath);
             const currentTask = tasksAfter.tasks.find(t => t.id === next);
             const ws = currentTask?.workstream;
-            
+
             if (ws) {
               const wsTasks = tasksAfter.tasks.filter(t => t.workstream === ws);
-              const completed = wsTasks.filter(t => t.status === "completed").length;
-              const total = wsTasks.length;
-              
-              if (completed === total) {
+              const wsCompleted = wsTasks.filter(t => t.status === "completed").length;
+              const wsTotal = wsTasks.length;
+
+              if (wsCompleted === wsTotal) {
                 console.log(`\n🎉 Workstream ${ws} completed!`);
-                await sendNotification({
-                  name: ws,
-                  status: "completed",
-                  message: `Workstream ${ws} done ${completed} of ${total} tasks`
-                });
+                await sendTelegram(formatWorkstreamCompleted(ws, wsCompleted, wsTotal));
               }
             }
-            
+
             if (!shouldContinue) {
               console.log("→ User chose to stop after task completion");
               running = false;
@@ -541,12 +612,7 @@ export async function main() {
                 console.log("   • Run 'bart run --workstream <X>' for each workstream in order");
                 console.log("   • Manually run the dependent tasks first");
                 
-                const depsList = [...depsFromOtherWs].join(", ");
-                await sendNotification({
-                  name: workstream || "unknown",
-                  status: "blocked",
-                  message: `Waiting on workstream ${depsList}`
-                });
+                await sendTelegram(formatWorkstreamBlocked(workstream || "unknown", [...depsFromOtherWs]));
                 
                 running = false;
                 continue;
@@ -792,7 +858,6 @@ export async function main() {
       console.log("\n🧠 Starting bart-think session...");
       console.log("This will guide you through structured thinking before planning.\n");
 
-      // 4. Spawn interactive Claude session
       const thinkPrompt = specificTask
         ? `Use the bart-think skill to help me think through: ${specificTask}`
         : "Use the bart-think skill to help me think through what I want to build.";
@@ -881,21 +946,57 @@ export async function main() {
         config.auto_continue = autoContinue;
         saveConfig(config);
         console.log(`✅ Auto-continue set to: ${autoContinue}`);
-      } else if (notifyUrl) {
-        const config = loadConfig();
-        config.notify_url = notifyUrl;
-        saveConfig(config);
-        console.log(`✅ Notification URL set`);
-        console.log(`   Format: ${notifyUrl}&input=...`);
+      } else if (telegramSetup) {
+        const rl = require("readline").createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        });
+        const ask = (q: string): Promise<string> =>
+          new Promise((resolve) => rl.question(q, (a: string) => resolve(a.trim())));
+
+        console.log("\n📱 Telegram Setup");
+        console.log("   1. Message @BotFather on Telegram and create a bot");
+        console.log("   2. Copy the bot token");
+        console.log("   3. Send a message to your bot, then get your chat ID\n");
+
+        const botToken = await ask("Bot token: ");
+        if (!botToken) {
+          console.error("Bot token is required.");
+          rl.close();
+          process.exit(1);
+        }
+        const chatId = await ask("Chat ID: ");
+        if (!chatId) {
+          console.error("Chat ID is required.");
+          rl.close();
+          process.exit(1);
+        }
+        rl.close();
+
+        console.log("\nSending test message...");
+        const ok = await sendTelegramTestMessage(botToken, chatId);
+        if (ok) {
+          const config = loadConfig();
+          config.telegram_bot_token = botToken;
+          config.telegram_chat_id = chatId;
+          saveConfig(config);
+          console.log("✅ Telegram configured! Check your Telegram for a confirmation message.");
+        } else {
+          console.error("❌ Test message failed. Check your bot token and chat ID.");
+          process.exit(1);
+        }
       } else {
         const config = loadConfig();
+        const tgStatus = config.telegram_bot_token && config.telegram_chat_id
+          ? `configured (chat ${config.telegram_chat_id})`
+          : "(not set)";
         console.log("\n📋 Current config:");
         console.log(`   agent: ${config.agent || "(not set)"}`);
         console.log(`   auto_continue: ${config.auto_continue !== undefined ? config.auto_continue : "(default: true)"}`);
-        console.log(`   notify_url: ${config.notify_url || "(not set)"}`);
+        console.log(`   telegram: ${tgStatus}`);
         console.log(`\nTo set agent: bart config --agent <claude|opencode>`);
         console.log(`To set auto-continue: bart config --auto-continue (or --no-auto-continue)`);
-        console.log(`To set notify URL: bart config --notify-url "shortcuts://..."`);
+        console.log(`To setup Telegram: bart config --telegram`);
       }
       break;
       

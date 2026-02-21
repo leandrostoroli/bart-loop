@@ -445,6 +445,25 @@ export function countResetsForTask(cwd: string, taskId: string, planSlug: string
 }
 
 /**
+ * Count distinct tasks that are currently errored in a workstream+plan combination.
+ * Excludes tasks that were later completed (reset + completed cycle).
+ */
+export function countWorkstreamErrors(cwd: string, workstream: string, planSlug: string): number {
+  const entries = loadHistory(cwd);
+  const erroredTasks = new Set(
+    entries
+      .filter(e => e.event === "error" && e.workstream === workstream && e.plan_slug === planSlug)
+      .map(e => e.task_id)
+  );
+  for (const entry of entries) {
+    if (entry.event === "completed" && entry.workstream === workstream && entry.plan_slug === planSlug) {
+      erroredTasks.delete(entry.task_id);
+    }
+  }
+  return erroredTasks.size;
+}
+
+/**
  * Aggregate per-specialist performance stats from history entries.
  */
 export function computeSpecialistStats(entries: HistoryEntry[]): SpecialistStats[] {
