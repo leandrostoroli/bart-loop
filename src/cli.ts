@@ -862,30 +862,23 @@ export async function main() {
         ? `Use the bart-think skill to help me think through: ${specificTask}`
         : "Use the bart-think skill to help me think through what I want to build.";
 
-      const THINK_SENTINEL = "BART_THINK_COMPLETE";
-      let planDetected = false;
+      // Snapshot existing plans before the session
+      const plansBefore = new Set(existsSync(plansDir) ? readdirSync(plansDir) : []);
 
       const thinkChild = spawn("claude", ["--dangerously-skip-permissions", thinkPrompt], {
         cwd,
-        stdio: ["inherit", "pipe", "inherit"]
-      });
-
-      // Forward stdout to terminal while watching for the sentinel
-      thinkChild.stdout!.on("data", (chunk: Buffer) => {
-        const text = chunk.toString();
-        process.stdout.write(text);
-        if (text.includes(THINK_SENTINEL)) {
-          planDetected = true;
-          console.log("\n\n📋 Plan written. Ending think session...");
-          thinkChild.kill("SIGTERM");
-        }
+        stdio: "inherit"
       });
 
       await new Promise<void>((resolve) => {
         thinkChild.on("close", () => resolve());
       });
 
-      if (planDetected) {
+      // After session ends, check if a new plan was written
+      const plansAfter = existsSync(plansDir) ? readdirSync(plansDir) : [];
+      const newPlans = plansAfter.filter(p => !plansBefore.has(p));
+      if (newPlans.length > 0) {
+        console.log("\n📋 Plan detected. Converting to tasks...");
         await runPlanCommand(cwd, resolveTasksPath(cwd), undefined, true, true);
       } else {
         console.log("\nNo plan was generated. Run 'bart think' again when ready.");

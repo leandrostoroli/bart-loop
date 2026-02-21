@@ -155,7 +155,7 @@ Propose specialist assignments for each task (same process as bart-plan Step 3c 
 
 ### Phase 6: Signal Completion
 
-After writing both files, output the completion summary followed by the sentinel marker on its own line. The `bart think` CLI watches for this marker to end the session and auto-generate tasks.
+After writing both files, output the completion summary:
 
 ```
 Plan written to .bart/plans/<slug>/plan.md
@@ -164,10 +164,9 @@ Context saved to .bart/CONTEXT.md
 - X requirements
 - Y tasks across Z workstreams
 - Specialists: [list or "none"]
-BART_THINK_COMPLETE
-```
 
-**Important:** The `BART_THINK_COMPLETE` marker MUST appear on its own line after the summary. Do not omit it — bart uses it to detect that the plan is ready and to terminate the session automatically.
+You can now exit the session — bart will automatically detect the plan and convert it to tasks.
+```
 
 ## Key Principles
 
