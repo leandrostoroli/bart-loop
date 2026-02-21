@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync, statSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync, statSync, chmodSync } from "fs";
 import { join, dirname } from "path";
 import { spawn } from "child_process";
 import { BART, BART_DIR } from "./constants.js";
@@ -7,7 +7,7 @@ import { printStatus, printWorkstreamStatus, printRequirementsReport } from "./s
 import { runDashboard } from "./dashboard.js";
 import { runPlanCommand } from "./plan.js";
 import { sendNotification, isNotificationConfigured } from "./notify.js";
-import { discoverSpecialists, printSpecialists, parseFrontmatter } from "./specialists.js";
+import { discoverSpecialists, printSpecialists, parseFrontmatter, appendHistory, extractPlanSlug, countResetsForTask, printSpecialistHistory } from "./specialists.js";
 import { generateZshCompletion, generateBashCompletion, installCompletions } from "./completions.js";
 
 const CONFIG_DIR = join(process.env.HOME || "", ".bart");
@@ -151,6 +151,8 @@ Usage:
   bart status            Show task status
   bart plans             List all plan executions
   bart dashboard         Launch TUI dashboard
+  bart think             Start guided thinking session before planning
+  bart think "topic"     Start thinking about a specific topic
   bart plan              Generate tasks from plan.md
   bart plan --latest     Generate tasks from latest plan (.bart/plans/ first, then Claude plans)
   bart plan --latest -y  Generate tasks from latest plan (skip confirmation)
@@ -160,7 +162,8 @@ Usage:
   bart watch             Auto-refresh dashboard
   bart requirements      Show requirements coverage report
   bart requirements --gaps  Show only uncovered/partial requirements
-  bart specialists       List discovered specialists (skills, agents, commands)
+  bart specialists            List discovered specialists (skills, agents, commands)
+  bart specialists --history  Show specialist performance from execution history
   bart reset <task-id>   Reset task to pending
   bart completions zsh   Output zsh completion script to stdout
   bart completions bash  Output bash completion script to stdout
@@ -285,6 +288,32 @@ Please complete this task.`;
     child.on("close", (code) => {
       if (code !== 0) {
         console.error(`\n⚠️ Agent exited with code ${code}`);
+
+        // Log error to history and update task status
+        const errTasksData = readTasks(tasksPath);
+        const errTaskIndex = errTasksData.tasks.findIndex(t => t.id === taskId);
+        if (errTaskIndex !== -1) {
+          errTasksData.tasks[errTaskIndex].status = "error";
+          errTasksData.tasks[errTaskIndex].error = `Agent exited with code ${code}`;
+          writeFileSync(tasksPath, JSON.stringify(errTasksData, null, 2));
+
+          const errTask = errTasksData.tasks[errTaskIndex];
+          const planSlug = extractPlanSlug(tasksPath);
+          appendHistory(projectRoot, {
+            timestamp: new Date().toISOString(),
+            event: "error",
+            task_id: taskId,
+            plan_slug: planSlug,
+            specialist: errTask.specialist || null,
+            status: "error",
+            duration_ms: errTask.started_at ? Date.now() - new Date(errTask.started_at).getTime() : null,
+            resets: countResetsForTask(projectRoot, taskId, planSlug),
+            files: errTask.files,
+            workstream: errTask.workstream,
+            title: errTask.title,
+          });
+        }
+
         process.exit(code || 1);
       }
       resolve();
@@ -298,6 +327,22 @@ Please complete this task.`;
     finalTasksData.tasks[finalTaskIndex].completed_at = new Date().toISOString();
     writeFileSync(tasksPath, JSON.stringify(finalTasksData, null, 2));
     console.log(`\n✅ Task ${taskId} marked as completed`);
+
+    const completedTask = finalTasksData.tasks[finalTaskIndex];
+    const planSlug = extractPlanSlug(tasksPath);
+    appendHistory(projectRoot, {
+      timestamp: new Date().toISOString(),
+      event: "completed",
+      task_id: taskId,
+      plan_slug: planSlug,
+      specialist: completedTask.specialist || null,
+      status: "completed",
+      duration_ms: completedTask.started_at ? Date.now() - new Date(completedTask.started_at).getTime() : null,
+      resets: countResetsForTask(projectRoot, taskId, planSlug),
+      files: completedTask.files,
+      workstream: completedTask.workstream,
+      title: completedTask.title,
+    });
   }
   
   const shouldAsk = autoContinue === false || (autoContinue === undefined && loadConfig().auto_continue === false);
@@ -333,6 +378,7 @@ export async function main() {
   let agentOverride: string | undefined;
   let autoContinue: boolean | undefined;
   let notifyUrl: string | undefined;
+  let showHistory = false;
 
   const remainingArgs: string[] = [];
   let skipNext = false;
@@ -359,6 +405,8 @@ export async function main() {
       skipNext = true;
     } else if (arg === "--auto-continue" || arg === "--no-auto-continue") {
       autoContinue = arg === "--auto-continue";
+    } else if (arg === "--history") {
+      showHistory = true;
     } else if (arg === "--notify-url" && args[i + 1]) {
       notifyUrl = args[i + 1];
       skipNext = true;
@@ -612,6 +660,7 @@ export async function main() {
 
       const skills = [
         { src: join(packageRoot, "skills", "bart-plan", "SKILL.md"), dir: join(claudeSkillsDir, "bart-plan"), name: "bart-plan" },
+        { src: join(packageRoot, "skills", "bart-think", "SKILL.md"), dir: join(claudeSkillsDir, "bart-think"), name: "bart-think" },
         { src: join(packageRoot, "SKILL.md"), dir: join(claudeSkillsDir, "bart-loop"), name: "bart-loop" },
       ];
 
@@ -659,7 +708,120 @@ export async function main() {
         mkdirSync(plansDir, { recursive: true });
         console.log(`Created ${BART_DIR}/plans/`);
       }
+
+      // Add .bart to .gitignore if not already present
+      const gitignorePath = join(cwd, ".gitignore");
+      let gitignoreContent = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
+      const hasEntry = gitignoreContent.split("\n").some(line => line.trim() === ".bart" || line.trim() === ".bart/");
+      if (!hasEntry) {
+        const newline = gitignoreContent.length > 0 && !gitignoreContent.endsWith("\n") ? "\n" : "";
+        writeFileSync(gitignorePath, gitignoreContent + newline + ".bart\n");
+        console.log(`Added .bart to .gitignore`);
+      } else {
+        console.log(`.bart already in .gitignore`);
+      }
+
+      // Install PostToolUse hook for auto-conversion on plan writes
+      const claudeHooksDir = join(cwd, ".claude", "hooks");
+      const hookDest = join(claudeHooksDir, "bart-post-plan.sh");
+      const initPackageRoot = dirname(dirname(new URL(import.meta.url).pathname));
+      const hookSrc = join(initPackageRoot, "hooks", "bart-post-plan.sh");
+
+      if (existsSync(hookSrc)) {
+        mkdirSync(claudeHooksDir, { recursive: true });
+        copyFileSync(hookSrc, hookDest);
+        chmodSync(hookDest, 0o755);
+        console.log(`Installed hook → .claude/hooks/bart-post-plan.sh`);
+
+        // Merge hook config into .claude/settings.json
+        const settingsPath = join(cwd, ".claude", "settings.json");
+        let settings: Record<string, any> = {};
+        if (existsSync(settingsPath)) {
+          try { settings = JSON.parse(readFileSync(settingsPath, "utf-8")); } catch {}
+        }
+
+        // Ensure hooks.PostToolUse exists
+        if (!settings.hooks) settings.hooks = {};
+        if (!settings.hooks.PostToolUse) settings.hooks.PostToolUse = [];
+
+        // Check if our hook is already registered
+        const hookCommand = ".claude/hooks/bart-post-plan.sh";
+        const alreadyInstalled = settings.hooks.PostToolUse.some((entry: any) =>
+          entry.matcher === "Write" &&
+          entry.hooks?.some((h: any) => h.command === hookCommand)
+        );
+
+        if (!alreadyInstalled) {
+          settings.hooks.PostToolUse.push({
+            matcher: "Write",
+            hooks: [
+              {
+                type: "command",
+                command: hookCommand
+              }
+            ]
+          });
+          writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+          console.log(`Updated .claude/settings.json with PostToolUse hook`);
+        } else {
+          console.log(`PostToolUse hook already configured in .claude/settings.json`);
+        }
+      } else {
+        console.log(`⚠️  Hook source not found: ${hookSrc}`);
+      }
+
       console.log("Bart Loop initialized!");
+      break;
+    }
+
+    case "think":
+    case "t": {
+      // 1. Lightweight init
+      const bartDir = join(cwd, BART_DIR);
+      const plansDir = join(cwd, BART_DIR, "plans");
+      if (!existsSync(bartDir)) mkdirSync(bartDir, { recursive: true });
+      if (!existsSync(plansDir)) mkdirSync(plansDir, { recursive: true });
+
+      // 2. Check skill installed
+      const skillPath = join(process.env.HOME || "", ".claude", "skills", "bart-think", "SKILL.md");
+      if (!existsSync(skillPath)) {
+        console.log("⚠️  bart-think skill not found. Run 'bart install' first.");
+        process.exit(1);
+      }
+
+      // 3. Record plan count before session
+      const plansBefore = readdirSync(plansDir).filter(e => {
+        try { return statSync(join(plansDir, e)).isDirectory(); } catch { return false; }
+      }).length;
+
+      console.log("\n🧠 Starting bart-think session...");
+      console.log("This will guide you through structured thinking before planning.\n");
+
+      // 4. Spawn interactive Claude session
+      const thinkPrompt = specificTask
+        ? `Use the bart-think skill to help me think through: ${specificTask}`
+        : "Use the bart-think skill to help me think through what I want to build.";
+
+      const thinkChild = spawn("claude", [thinkPrompt], {
+        cwd,
+        stdio: "inherit"
+      });
+
+      await new Promise<void>((resolve) => {
+        thinkChild.on("close", () => resolve());
+      });
+
+      // 5. Check for new plans
+      const plansAfter = readdirSync(plansDir).filter(e => {
+        try { return statSync(join(plansDir, e)).isDirectory(); } catch { return false; }
+      }).length;
+
+      if (plansAfter > plansBefore) {
+        console.log("\n📋 New plan detected. Generating tasks...");
+        await runPlanCommand(cwd, resolveTasksPath(cwd), undefined, true, true);
+      } else {
+        console.log("\nNo plan was generated. Run 'bart think' again when ready.");
+      }
       break;
     }
 
@@ -696,6 +858,7 @@ export async function main() {
       {
         const specialists = discoverSpecialists(cwd);
         printSpecialists(specialists);
+        if (showHistory) printSpecialistHistory(cwd);
       }
       break;
 
@@ -748,11 +911,30 @@ export async function main() {
         console.error(`Task ${specificTask} not found`);
         process.exit(1);
       }
+      const resetTask = resetTasks.tasks[resetTaskIndex];
+      const resetPlanSlug = extractPlanSlug(tasksPath);
+      const previousResets = countResetsForTask(cwd, specificTask, resetPlanSlug);
+
       resetTasks.tasks[resetTaskIndex].status = "pending";
       resetTasks.tasks[resetTaskIndex].started_at = null;
       resetTasks.tasks[resetTaskIndex].completed_at = null;
       resetTasks.tasks[resetTaskIndex].error = null;
       writeFileSync(tasksPath, JSON.stringify(resetTasks, null, 2));
+
+      appendHistory(cwd, {
+        timestamp: new Date().toISOString(),
+        event: "reset",
+        task_id: specificTask,
+        plan_slug: resetPlanSlug,
+        specialist: resetTask.specialist || null,
+        status: "reset",
+        duration_ms: null,
+        resets: previousResets + 1,
+        files: resetTask.files,
+        workstream: resetTask.workstream,
+        title: resetTask.title,
+      });
+
       console.log(`✅ Task ${specificTask} reset to pending`);
       break;
       

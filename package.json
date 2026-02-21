@@ -49,6 +49,7 @@
   "files": [
     "src/**/*",
     "skills/**/*",
+    "hooks/**/*",
     "bart-prompt-template.md",
     "scripts/**/*"
   ],

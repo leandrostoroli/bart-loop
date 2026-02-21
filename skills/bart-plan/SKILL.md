@@ -88,8 +88,10 @@ First, collect all available skills/agents/commands from two sources:
 
 **Local specialists** — always check:
 ```bash
-bart specialists 2>/dev/null || echo "No local specialists discovered"
+bart specialists --history 2>/dev/null || echo "No local specialists discovered"
 ```
+
+Use history stats when proposing assignments: prefer high completion-rate specialists for critical tasks, flag high reset-rate specialists, note untested specialists in the confidence column.
 
 **Remote skill search** — check if `find-skills` is installed:
 ```bash

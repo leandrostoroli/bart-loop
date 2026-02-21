@@ -261,6 +261,21 @@ The **bart-plan** skill (`skills/bart-plan/SKILL.md`) is a **converter, not a pl
 
 It auto-triggers before plan implementation when a `.bart/` directory exists, converting freeform plans into structured `plan.md` files that parse into high-quality tracked tasks via `bart plan`.
 
+## Guided Thinking
+
+The **bart-think** skill (`skills/bart-think/SKILL.md`) guides structured problem exploration before planning. Unlike bart-plan (which converts existing plans), bart-think helps users **discover what to build** through conversation:
+
+1. **Open-ended discovery** — Understand the problem through reactive questioning
+2. **Gray area identification** — Surface domain-specific ambiguities
+3. **Deep-dive decisions** — Resolve each ambiguity with concrete choices (locked/discretionary/deferred)
+4. **Scope guardrail** — Confirm scope and push back on creep
+5. **Write outputs** — Produces `.bart/CONTEXT.md` (decisions) + a bart-format `plan.md` directly (no conversion step)
+
+```bash
+bart think               # Start open-ended thinking session
+bart think "add auth"    # Start thinking about a specific topic
+```
+
 ## Integration with AI Agents
 
 This skill works with:

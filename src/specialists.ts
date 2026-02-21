@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import { existsSync, readFileSync, readdirSync, statSync, appendFileSync, mkdirSync } from "fs";
 import { join, basename, extname } from "path";
-import { Specialist, Task } from "./constants.js";
+import { Specialist, Task, HistoryEntry, HISTORY_FILE, BART_DIR } from "./constants.js";
 
 const HOME = process.env.HOME || "";
 
@@ -378,4 +378,174 @@ export function printSpecialists(specialists: Specialist[]) {
     console.log(`      ${s.path}`);
   }
   console.log("");
+}
+
+// --- History tracking ---
+
+export interface SpecialistStats {
+  name: string;
+  total: number;
+  completed: number;
+  errored: number;
+  avg_duration_ms: number | null;
+  reset_rate: number;       // resets / total (0.0 - 1.0)
+  total_resets: number;
+}
+
+/**
+ * Extract plan slug from a tasks.json path.
+ * e.g. ".bart/plans/my-feature/tasks.json" → "my-feature"
+ * Falls back to "_legacy" for .bart/tasks.json or unknown paths.
+ */
+export function extractPlanSlug(tasksPath: string): string {
+  const match = tasksPath.match(/\.bart\/plans\/([^/]+)\/tasks\.json/);
+  return match ? match[1] : "_legacy";
+}
+
+/**
+ * Append a single history entry as a JSONL line to .bart/history.jsonl.
+ * Creates the file and .bart/ directory if needed.
+ */
+export function appendHistory(cwd: string, entry: HistoryEntry): void {
+  const bartDir = join(cwd, BART_DIR);
+  if (!existsSync(bartDir)) {
+    mkdirSync(bartDir, { recursive: true });
+  }
+  const historyPath = join(bartDir, HISTORY_FILE);
+  appendFileSync(historyPath, JSON.stringify(entry) + "\n");
+}
+
+/**
+ * Load all history entries from .bart/history.jsonl.
+ * Skips malformed lines silently.
+ */
+export function loadHistory(cwd: string): HistoryEntry[] {
+  const historyPath = join(cwd, BART_DIR, HISTORY_FILE);
+  if (!existsSync(historyPath)) return [];
+
+  const entries: HistoryEntry[] = [];
+  const content = readFileSync(historyPath, "utf-8");
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      entries.push(JSON.parse(line));
+    } catch {}
+  }
+  return entries;
+}
+
+/**
+ * Count the number of reset events for a specific task+plan combination.
+ */
+export function countResetsForTask(cwd: string, taskId: string, planSlug: string): number {
+  const entries = loadHistory(cwd);
+  return entries.filter(
+    e => e.event === "reset" && e.task_id === taskId && e.plan_slug === planSlug
+  ).length;
+}
+
+/**
+ * Aggregate per-specialist performance stats from history entries.
+ */
+export function computeSpecialistStats(entries: HistoryEntry[]): SpecialistStats[] {
+  const map = new Map<string, {
+    total: number;
+    completed: number;
+    errored: number;
+    durations: number[];
+    resets: number;
+  }>();
+
+  for (const e of entries) {
+    const name = e.specialist || "(default agent)";
+
+    if (!map.has(name)) {
+      map.set(name, { total: 0, completed: 0, errored: 0, durations: [], resets: 0 });
+    }
+    const stats = map.get(name)!;
+
+    if (e.event === "completed") {
+      stats.total++;
+      stats.completed++;
+      if (e.duration_ms != null) stats.durations.push(e.duration_ms);
+    } else if (e.event === "error") {
+      stats.total++;
+      stats.errored++;
+    } else if (e.event === "reset") {
+      stats.resets++;
+    }
+  }
+
+  const result: SpecialistStats[] = [];
+  for (const [name, data] of map) {
+    const total = data.total;
+    const avg = data.durations.length > 0
+      ? data.durations.reduce((a, b) => a + b, 0) / data.durations.length
+      : null;
+    result.push({
+      name,
+      total,
+      completed: data.completed,
+      errored: data.errored,
+      avg_duration_ms: avg,
+      reset_rate: total > 0 ? data.resets / total : 0,
+      total_resets: data.resets,
+    });
+  }
+
+  // Sort by total tasks descending
+  result.sort((a, b) => b.total - a.total);
+  return result;
+}
+
+/**
+ * Print formatted specialist performance stats from execution history.
+ */
+export function printSpecialistHistory(cwd: string): void {
+  const entries = loadHistory(cwd);
+  if (entries.length === 0) {
+    console.log("\nNo execution history found.");
+    console.log("History is recorded when tasks are completed, errored, or reset.\n");
+    return;
+  }
+
+  const stats = computeSpecialistStats(entries);
+
+  console.log(`\nExecution History (${entries.length} events):\n`);
+
+  // Header
+  const nameW = Math.max(20, ...stats.map(s => s.name.length)) + 2;
+  const header = [
+    "Specialist".padEnd(nameW),
+    "Done".padStart(5),
+    "Err".padStart(5),
+    "Resets".padStart(7),
+    "Reset%".padStart(7),
+    "Avg Time".padStart(10),
+  ].join("  ");
+  console.log(`  ${header}`);
+  console.log(`  ${"─".repeat(header.length)}`);
+
+  for (const s of stats) {
+    const resetPct = s.total > 0 ? `${Math.round(s.reset_rate * 100)}%` : "—";
+    const avgTime = s.avg_duration_ms != null ? formatDuration(s.avg_duration_ms) : "—";
+    const row = [
+      s.name.padEnd(nameW),
+      String(s.completed).padStart(5),
+      String(s.errored).padStart(5),
+      String(s.total_resets).padStart(7),
+      resetPct.padStart(7),
+      avgTime.padStart(10),
+    ].join("  ");
+    console.log(`  ${row}`);
+  }
+  console.log("");
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const mins = Math.floor(ms / 60000);
+  const secs = Math.round((ms % 60000) / 1000);
+  return `${mins}m${secs}s`;
 }

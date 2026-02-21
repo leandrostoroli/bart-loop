@@ -50,3 +50,19 @@ export interface TasksData {
   specialists?: Specialist[];
   tasks: Task[];
 }
+
+export const HISTORY_FILE = "history.jsonl";
+
+export interface HistoryEntry {
+  timestamp: string;          // ISO 8601
+  event: "completed" | "error" | "reset";
+  task_id: string;
+  plan_slug: string;          // directory name from .bart/plans/<slug>/ or "_legacy"
+  specialist: string | null;
+  status: "completed" | "error" | "reset";
+  duration_ms: number | null; // null for resets
+  resets: number;             // count of prior resets for this task+plan
+  files: string[];
+  workstream: string;
+  title: string;
+}

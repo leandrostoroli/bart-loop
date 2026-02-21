@@ -28,6 +28,7 @@ _bart() {
     'specialists:List discovered specialists'
     'config:Show or set configuration'
     'reset:Reset a task to pending'
+    'think:Start guided thinking session before planning'
     'install:Install bart skills globally'
     'init:Initialize bart in current project'
     'completions:Generate or install shell completions'
@@ -95,12 +96,21 @@ _bart() {
           )
           _describe -t subcommands 'completions subcommand' subcommands
           ;;
+        specialists)
+          _arguments \\
+            \$global_flags[@] \\
+            '--history[Show specialist performance from execution history]'
+          ;;
         requirements|reqs)
           _arguments \\
             \$global_flags[@] \\
             '--gaps[Show only uncovered/partial requirements]'
           ;;
         status|s)
+          _arguments \\
+            \$global_flags[@]
+          ;;
+        think|t)
           _arguments \\
             \$global_flags[@]
           ;;
@@ -259,7 +269,7 @@ _bart() {
   local cur prev words cword
   _init_completion || return
 
-  local commands="status run plan plans dashboard watch convert requirements specialists config reset install init completions help"
+  local commands="status run plan plans think dashboard watch convert requirements specialists config reset install init completions help"
   local global_flags="--plan --workstream --tasks --plan-file --agent --auto-continue --no-auto-continue --help"
 
   # Find the subcommand
@@ -334,8 +344,14 @@ _bart() {
     completions)
       COMPREPLY=( $(compgen -W "zsh bash install" -- "$cur") )
       ;;
+    specialists)
+      COMPREPLY=( $(compgen -W "$global_flags --history" -- "$cur") )
+      ;;
     requirements|reqs)
       COMPREPLY=( $(compgen -W "$global_flags --gaps" -- "$cur") )
+      ;;
+    think|t)
+      COMPREPLY=( $(compgen -W "$global_flags" -- "$cur") )
       ;;
     status|s|dashboard|d|watch|w)
       COMPREPLY=( $(compgen -W "$global_flags" -- "$cur") )
