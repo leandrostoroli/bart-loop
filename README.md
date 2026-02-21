@@ -24,7 +24,8 @@ Bart fixes that. It's the automation layer that:
 - **Handles dependencies** — Waits for cross-workstream deps, notifies when blocked
 - **Works in parallel** — Run multiple workstreams in separate terminals
 - **Manages multiple plans** — Each plan gets isolated task tracking
-- **Keeps you informed** — Notifications when workstreams complete or get stuck
+- **Keeps you informed** — Telegram notifications for task completions, errors, and milestones
+- **Thinks before it plans** — Interactive guided exploration to figure out *what* to build
 
 No more:
 - Starting Claude for every single task
@@ -55,27 +56,16 @@ bart install
 ## Quick Start
 
 ```bash
-# 1. Create a plan.md
-cat > plan.md << 'EOF'
-# My Project
+# 1. Initialize bart in your project
+bart init
 
-## Setup
-### Initialize project
-### Configure TypeScript
+# 2. Think through what you want to build (interactive)
+bart think
 
-## Backend
-### Create API
-### Add database
-
-## Frontend
-### Build UI
-### Style components
-EOF
-
-# 2. Generate tasks
+# 3. Or create a plan.md manually and generate tasks
 bart plan
 
-# 3. Run everything
+# 4. Run everything
 bart run
 ```
 
@@ -88,9 +78,9 @@ bart plan --latest
 
 ## How It Works
 
-### 1. Plan
+### 1. Think & Plan
 
-Create a `plan.md` with your project tasks, or use Claude's plan mode to generate one. Bart converts it into executable tasks.
+Start with `bart think` to explore your idea interactively — bart guides you through structured discovery, surfaces ambiguities, and writes a plan directly. Or create a `plan.md` manually and convert it with `bart plan`.
 
 ### 2. Execute
 
@@ -127,6 +117,9 @@ bart run --workstream B
 | `bart run --no-auto-continue` | Ask after each task |
 | `bart run A1` | Run specific task |
 | `bart run --workstream B` | Run tasks in workstream B only |
+| `bart think` | Interactive guided thinking session |
+| `bart think "topic"` | Think session with a starting topic |
+| `bart init` | Initialize bart in your project |
 | `bart status` | Show progress |
 | `bart status --workstream A` | Detailed status for workstream A |
 | `bart plans` | List all plan executions with progress |
@@ -138,10 +131,12 @@ bart run --workstream B
 | `bart convert` | Convert latest plan to bart tasks |
 | `bart requirements` | Show requirements coverage report |
 | `bart specialists` | List discovered specialists |
+| `bart specialists --history` | Show specialist execution history |
 | `bart reset A1` | Reset task A1 to pending |
 | `bart completions install` | Install shell tab-completions |
 | `bart install` | Install skills and shell completions |
 | `bart config` | Show configuration |
+| `bart config --telegram` | Setup Telegram notifications |
 
 ### Plan Selection
 
@@ -174,21 +169,24 @@ bart config --agent opencode   # OpenCode
 bart config --auto-continue   # Run all tasks automatically (default)
 bart config --no-auto-continue  # Ask after each task
 
-# Notifications
-bart config --notify-url "https://api.day.app/YOUR_KEY/"
+# Telegram notifications
+bart config --telegram
 ```
 
 ### Notifications
 
-Get notified when workstreams complete or get blocked:
+Get notified on task completions, errors, milestones, and workstream status:
 
-**iOS via Bark (Recommended)**
-1. Install [Bark](https://apps.apple.com/app/bark/) on iPhone (free)
-2. Get your key from the app
-3. Configure: `bart config --notify-url "https://api.day.app/YOUR_KEY/"`
+**Telegram (Recommended)**
+1. Create a bot via [@BotFather](https://t.me/BotFather) on Telegram
+2. Get your chat ID (message the bot and check the API)
+3. Configure: `bart config --telegram`
 
-**Mac Notifications**
-Native macOS notifications work automatically. Enable "Sync to this iPhone" in Notification settings to receive on iOS.
+Bart sends notifications for:
+- Task completions and failures
+- Workstream completions and blocks
+- Milestone progress (25%, 50%, 75%, 100%)
+- Critical errors requiring attention
 
 ---
 
@@ -206,6 +204,26 @@ bart completions bash > bart.bash
 ```
 
 Completions are also installed automatically when you run `bart install`.
+
+---
+
+## Thinking Before Planning
+
+Not sure what to build yet? `bart think` starts an interactive session that guides you through structured exploration:
+
+```bash
+bart think                    # Open-ended exploration
+bart think "auth system"      # Start with a specific topic
+```
+
+The session walks you through:
+1. **Discovery** — Understanding what you're building
+2. **Gray areas** — Surfacing domain-specific ambiguities
+3. **Decisions** — Concrete choices with tradeoffs
+4. **Scope lock** — Confirming what's in and what's deferred
+5. **Plan output** — Writing a bart-format plan directly
+
+When you're done, exit the session. Bart automatically detects the new plan and converts it to tasks — no extra steps needed.
 
 ---
 
@@ -240,11 +258,12 @@ Bart waits automatically and notifies when blocked.
 
 ```
 your-project/
-├── plan.md                 # Your project plan
+├── plan.md                 # Your project plan (optional)
 └── .bart/
+    ├── CONTEXT.md          # Decisions and context from bart think
     └── plans/
         └── <date>-<slug>/
-            ├── plan.md     # Copied plan
+            ├── plan.md     # Plan (from think session or converted)
             └── tasks.json  # Generated tasks
 ```
 
