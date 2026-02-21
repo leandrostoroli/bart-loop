@@ -789,11 +789,6 @@ export async function main() {
         process.exit(1);
       }
 
-      // 3. Record plan count before session
-      const plansBefore = readdirSync(plansDir).filter(e => {
-        try { return statSync(join(plansDir, e)).isDirectory(); } catch { return false; }
-      }).length;
-
       console.log("\n🧠 Starting bart-think session...");
       console.log("This will guide you through structured thinking before planning.\n");
 
@@ -802,22 +797,30 @@ export async function main() {
         ? `Use the bart-think skill to help me think through: ${specificTask}`
         : "Use the bart-think skill to help me think through what I want to build.";
 
-      const thinkChild = spawn("claude", [thinkPrompt], {
+      const THINK_SENTINEL = "BART_THINK_COMPLETE";
+      let planDetected = false;
+
+      const thinkChild = spawn("claude", ["--dangerously-skip-permissions", thinkPrompt], {
         cwd,
-        stdio: "inherit"
+        stdio: ["inherit", "pipe", "inherit"]
+      });
+
+      // Forward stdout to terminal while watching for the sentinel
+      thinkChild.stdout!.on("data", (chunk: Buffer) => {
+        const text = chunk.toString();
+        process.stdout.write(text);
+        if (text.includes(THINK_SENTINEL)) {
+          planDetected = true;
+          console.log("\n\n📋 Plan written. Ending think session...");
+          thinkChild.kill("SIGTERM");
+        }
       });
 
       await new Promise<void>((resolve) => {
         thinkChild.on("close", () => resolve());
       });
 
-      // 5. Check for new plans
-      const plansAfter = readdirSync(plansDir).filter(e => {
-        try { return statSync(join(plansDir, e)).isDirectory(); } catch { return false; }
-      }).length;
-
-      if (plansAfter > plansBefore) {
-        console.log("\n📋 New plan detected. Generating tasks...");
+      if (planDetected) {
         await runPlanCommand(cwd, resolveTasksPath(cwd), undefined, true, true);
       } else {
         console.log("\nNo plan was generated. Run 'bart think' again when ready.");
