@@ -1013,7 +1013,10 @@ export async function main() {
       
       if (config.agent === "claude") {
         thinkCmd = "claude";
-        thinkArgs = ["-p"];
+        const prompt = specificTask
+          ? `/bart-think ${specificTask}`
+          : "/bart-think";
+        thinkArgs = [prompt];
       } else {
         // Use opencode TUI (not 'run' mode) for interactive session
         thinkCmd = "opencode";
