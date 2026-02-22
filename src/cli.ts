@@ -865,7 +865,8 @@ export async function main() {
       // Snapshot existing plans before the session
       const plansBefore = new Set(existsSync(plansDir) ? readdirSync(plansDir) : []);
 
-      const thinkChild = spawn("claude", ["--dangerously-skip-permissions", thinkPrompt], {
+      const agent = await detectAgent();
+      const thinkChild = spawn(agent.cmd, [...agent.args, thinkPrompt], {
         cwd,
         stdio: "inherit"
       });
