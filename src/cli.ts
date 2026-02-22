@@ -1016,7 +1016,7 @@ export async function main() {
         const prompt = specificTask
           ? `/bart-think ${specificTask}`
           : "/bart-think";
-        thinkArgs = [prompt];
+        thinkArgs = ["--dangerously-skip-permissions", prompt];
       } else {
         // Use opencode TUI (not 'run' mode) for interactive session
         thinkCmd = "opencode";
