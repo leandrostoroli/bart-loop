@@ -27,6 +27,7 @@ _bart() {
     'requirements:Show requirements coverage report'
     'specialists:List discovered specialists'
     'config:Show or set configuration'
+    'stop:Send stop signal to a running bart run'
     'reset:Reset a task to pending'
     'think:Start guided thinking session before planning'
     'install:Install bart skills globally'
@@ -269,7 +270,7 @@ _bart() {
   local cur prev words cword
   _init_completion || return
 
-  local commands="status run plan plans think dashboard watch convert requirements specialists config reset install init completions help"
+  local commands="status run plan plans think dashboard watch convert requirements specialists config stop reset install init completions help"
   local global_flags="--plan --workstream --tasks --plan-file --agent --auto-continue --no-auto-continue --help"
 
   # Find the subcommand

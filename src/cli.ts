@@ -1,13 +1,13 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync, statSync, chmodSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync, statSync, chmodSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
-import { spawn } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import { BART, BART_DIR } from "./constants.js";
 import { readTasks, findNextTask, getCwd, getTaskById, resolvePlanTasksPath } from "./tasks.js";
 import { printStatus, printWorkstreamStatus, printRequirementsReport } from "./status.js";
 import { runDashboard } from "./dashboard.js";
 import { runPlanCommand } from "./plan.js";
 import { sendTelegram, sendTelegramTestMessage, formatTaskCompleted, formatTaskError, formatCriticalError, formatWorkstreamCompleted, formatWorkstreamBlocked, formatMilestone } from "./notify.js";
-import { discoverSpecialists, printSpecialists, parseFrontmatter, appendHistory, extractPlanSlug, countResetsForTask, countWorkstreamErrors, printSpecialistHistory } from "./specialists.js";
+import { discoverSpecialists, printSpecialists, parseFrontmatter, appendHistory, extractPlanSlug, countResetsForTask, countWorkstreamErrors, printSpecialistHistory, scoreSpecialists, loadHistory, recordPairing, loadSpecialistModel, printSpecialistBoard, generateSpecialistsSummary } from "./specialists.js";
 import { generateZshCompletion, generateBashCompletion, installCompletions } from "./completions.js";
 
 const CONFIG_DIR = join(process.env.HOME || "", ".bart");
@@ -38,6 +38,64 @@ function saveConfig(config: BartConfig) {
   } catch (e) {
     console.error("Failed to save config:", e);
   }
+}
+
+// --- Graceful shutdown state ---
+const STOP_FILE = "stop";
+let currentChild: ChildProcess | null = null;
+let currentTasksPath: string | null = null;
+let currentTaskId: string | null = null;
+let shuttingDown = false;
+
+function checkStopSignal(cwd: string): boolean {
+  const stopPath = join(cwd, BART_DIR, STOP_FILE);
+  if (existsSync(stopPath)) {
+    try { unlinkSync(stopPath); } catch {}
+    return true;
+  }
+  return false;
+}
+
+function resetInProgressTask(tasksPath: string, taskId: string) {
+  try {
+    const tasksData = readTasks(tasksPath);
+    const idx = tasksData.tasks.findIndex(t => t.id === taskId);
+    if (idx !== -1 && tasksData.tasks[idx].status === "in_progress") {
+      tasksData.tasks[idx].status = "pending";
+      tasksData.tasks[idx].started_at = null;
+      writeFileSync(tasksPath, JSON.stringify(tasksData, null, 2));
+      console.log(`\n↩️  Task ${taskId} reset to pending`);
+    }
+  } catch {}
+}
+
+function installSignalHandlers() {
+  const handler = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`\n\n⛔ Caught ${signal} — shutting down gracefully...`);
+
+    if (currentChild && !currentChild.killed) {
+      console.log("   Terminating agent process...");
+      currentChild.kill("SIGTERM");
+      // Force kill after 3 seconds if still alive
+      setTimeout(() => {
+        if (currentChild && !currentChild.killed) {
+          currentChild.kill("SIGKILL");
+        }
+      }, 3000).unref();
+    }
+
+    if (currentTasksPath && currentTaskId) {
+      resetInProgressTask(currentTasksPath, currentTaskId);
+    }
+
+    // Give child a moment to exit, then force exit
+    setTimeout(() => process.exit(130), 3500).unref();
+  };
+
+  process.on("SIGINT", () => handler("SIGINT"));
+  process.on("SIGTERM", () => handler("SIGTERM"));
 }
 
 /**
@@ -163,8 +221,11 @@ Usage:
   bart watch             Auto-refresh dashboard
   bart requirements      Show requirements coverage report
   bart requirements --gaps  Show only uncovered/partial requirements
+  bart suggest "<task>"  Suggest best specialists for a task description
   bart specialists            List discovered specialists (skills, agents, commands)
+  bart specialists --board    Show specialist board grouped by effectiveness
   bart specialists --history  Show specialist performance from execution history
+  bart stop              Send stop signal to a running 'bart run' (from another terminal)
   bart reset <task-id>   Reset task to pending
   bart completions zsh   Output zsh completion script to stdout
   bart completions bash  Output bash completion script to stdout
@@ -281,23 +342,36 @@ Files to work on: ${task.files.join(", ")}${specialistContext}
 Please complete this task.`;
   
   const args = [...agentConfig.args, taskPrompt];
-  
+
+  // Track for graceful shutdown
+  currentTasksPath = tasksPath;
+  currentTaskId = taskId;
+
   const child = spawn(agentConfig.cmd, args, {
     cwd: projectRoot,
     stdio: "inherit"
   });
-  
+  currentChild = child;
+
   const exitCode = await new Promise<number | null>((resolve) => {
     child.on("close", (code) => {
+      currentChild = null;
       resolve(code);
     });
     child.on("error", (err) => {
+      currentChild = null;
       console.error(`\n❌ Failed to start agent: ${err.message}`);
       resolve(1);
     });
   });
 
   if (exitCode !== 0) {
+    // If we're shutting down via signal, don't treat this as an error —
+    // the signal handler already reset the task to pending
+    if (shuttingDown) {
+      return false;
+    }
+
     console.error(`\n⚠️ Agent exited with code ${exitCode}`);
 
     // Log error to history and update task status
@@ -324,6 +398,9 @@ Please complete this task.`;
         workstream: errTask.workstream,
         title: errTask.title,
       });
+
+      // Record failed pairing in specialist model [REQ-02]
+      recordPairing(projectRoot, errTask, false);
 
       // Send error notification [REQ-05]
       await sendTelegram(formatTaskError(errTask, resets + 1));
@@ -373,6 +450,9 @@ Please complete this task.`;
       title: completedTask.title,
     });
 
+    // Record successful pairing in specialist model [REQ-02]
+    recordPairing(projectRoot, completedTask, true);
+
     await sendTelegram(formatTaskCompleted(completedTask));
 
     // Milestone check: right after task completion, check if we crossed a threshold
@@ -406,8 +486,11 @@ Please complete this task.`;
     }
   }
 
+  // Clear tracking state after task completes normally
+  currentTaskId = null;
+
   const shouldAsk = autoContinue === false || (autoContinue === undefined && loadConfig().auto_continue === false);
-  
+
   if (shouldAsk) {
     const readline = require("readline").createInterface({
       input: process.stdin,
@@ -440,6 +523,7 @@ export async function main() {
   let autoContinue: boolean | undefined;
   let telegramSetup = false;
   let showHistory = false;
+  let showBoard = false;
 
   const remainingArgs: string[] = [];
   let skipNext = false;
@@ -468,6 +552,8 @@ export async function main() {
       autoContinue = arg === "--auto-continue";
     } else if (arg === "--history") {
       showHistory = true;
+    } else if (arg === "--board") {
+      showBoard = true;
     } else if (arg === "--telegram") {
       telegramSetup = true;
     } else if (!arg.startsWith("-") || arg === "-a") {
@@ -521,7 +607,28 @@ export async function main() {
         console.log("No tasks.json found. Run 'bart init' first.");
         process.exit(1);
       }
-      
+
+      // Install signal handlers for graceful shutdown
+      installSignalHandlers();
+
+      // Clear any stale stop signal from a previous run
+      checkStopSignal(cwd);
+
+      // Recover tasks stuck in_progress from a previous interrupted run
+      {
+        const recoveryTasks = readTasks(tasksPath);
+        const stale = recoveryTasks.tasks.filter(t => t.status === "in_progress");
+        if (stale.length > 0) {
+          console.log(`\n⚠️  Found ${stale.length} task(s) stuck in_progress from a previous run — resetting to pending:`);
+          for (const t of stale) {
+            t.status = "pending";
+            t.started_at = null;
+            console.log(`   ↩️  ${t.id}: ${t.title}`);
+          }
+          writeFileSync(tasksPath, JSON.stringify(recoveryTasks, null, 2));
+        }
+      }
+
       if (specificTask) {
         await runAgent(specificTask, tasksPath, agentOverride, autoContinue);
       } else {
@@ -543,12 +650,19 @@ export async function main() {
           }
         }
         while (running) {
+          // Check for stop signal from `bart stop`
+          if (checkStopSignal(cwd)) {
+            console.log("\n⛔ Stop signal received (via 'bart stop'). Stopping after current iteration.");
+            await sendTelegram("⛔ Bart run stopped by user (bart stop)");
+            break;
+          }
+
           iterations++;
           if (iterations > 100) {
             console.log("\n⚠️ Safety limit reached (100 iterations). Stopping.");
             break;
           }
-          
+
           const tasks = readTasks(tasksPath);
           const next = findNextTask(tasks, workstream);
           
@@ -624,7 +738,15 @@ export async function main() {
               while (waited < 120) {
                 await new Promise(resolve => setTimeout(resolve, 5000));
                 waited += 5;
-                
+
+                // Check for stop signal during wait
+                if (checkStopSignal(cwd)) {
+                  console.log("\n⛔ Stop signal received. Stopping.");
+                  await sendTelegram("⛔ Bart run stopped by user (bart stop)");
+                  running = false;
+                  break;
+                }
+
                 const checkTasks = readTasks(tasksPath);
                 const checkNext = findNextTask(checkTasks, workstream);
                 
@@ -681,7 +803,7 @@ export async function main() {
         }
         
         const finalTasks = readTasks(tasksPath);
-        const allDone = finalTasks.tasks.every(t => 
+        const allDone = finalTasks.tasks.every(t =>
           !workstream || t.workstream === workstream ? t.status === "completed" : true
         );
         if (allDone) {
@@ -689,9 +811,29 @@ export async function main() {
         } else {
           console.log("\n📊 Run complete. Use 'bart status' to see progress.");
         }
+
+        // Auto-generate .bart/specialists.md on run completion [REQ-06]
+        const bartDir = join(cwd, BART_DIR);
+        if (existsSync(bartDir)) {
+          const specialists = discoverSpecialists(cwd);
+          const summaryPath = join(bartDir, "specialists.md");
+          writeFileSync(summaryPath, generateSpecialistsSummary(specialists, cwd));
+        }
       }
       break;
-      
+
+    case "stop": {
+      const bartDir = join(cwd, BART_DIR);
+      if (!existsSync(bartDir)) {
+        mkdirSync(bartDir, { recursive: true });
+      }
+      const stopPath = join(bartDir, STOP_FILE);
+      writeFileSync(stopPath, new Date().toISOString());
+      console.log("⛔ Stop signal sent. Bart will stop after the current task finishes.");
+      console.log("   (The running agent will be allowed to complete its current task cleanly.)");
+      break;
+    }
+
     case "completions": {
       const subcommand = specificTask;
       if (subcommand === "zsh") {
@@ -857,16 +999,28 @@ export async function main() {
 
       console.log("\n🧠 Starting bart-think session...");
       console.log("This will guide you through structured thinking before planning.\n");
-
-      const thinkPrompt = specificTask
-        ? `Use the bart-think skill to help me think through: ${specificTask}`
-        : "Use the bart-think skill to help me think through what I want to build.";
+      console.log("Tell the agent what you want to build or solve.");
+      console.log("The bart-think skill will auto-load when you describe your project.\n");
 
       // Snapshot existing plans before the session
       const plansBefore = new Set(existsSync(plansDir) ? readdirSync(plansDir) : []);
 
-      const agent = await detectAgent();
-      const thinkChild = spawn(agent.cmd, [...agent.args, thinkPrompt], {
+      // For think, we launch TUI mode (opencode without 'run') so it's interactive
+      // The skill will auto-load based on keywords in the conversation
+      const config = loadConfig();
+      let thinkCmd: string;
+      let thinkArgs: string[];
+      
+      if (config.agent === "claude") {
+        thinkCmd = "claude";
+        thinkArgs = ["-p"];
+      } else {
+        // Use opencode TUI (not 'run' mode) for interactive session
+        thinkCmd = "opencode";
+        thinkArgs = [];
+      }
+
+      const thinkChild = spawn(thinkCmd, thinkArgs, {
         cwd,
         stdio: "inherit"
       });
@@ -919,10 +1073,66 @@ export async function main() {
     case "specialists":
       {
         const specialists = discoverSpecialists(cwd);
-        printSpecialists(specialists);
-        if (showHistory) printSpecialistHistory(cwd);
+        if (showBoard) {
+          printSpecialistBoard(specialists, cwd);
+          // Generate .bart/specialists.md
+          const bartDir = join(cwd, BART_DIR);
+          if (existsSync(bartDir)) {
+            const summaryPath = join(bartDir, "specialists.md");
+            writeFileSync(summaryPath, generateSpecialistsSummary(specialists, cwd));
+            console.log(`  Updated ${summaryPath}\n`);
+          }
+        } else {
+          printSpecialists(specialists);
+          if (showHistory) printSpecialistHistory(cwd);
+        }
       }
       break;
+
+    case "suggest": {
+      const taskDescription = specificTask;
+      if (!taskDescription) {
+        console.error('Usage: bart suggest "<task description>"');
+        console.error('Example: bart suggest "Add dark mode toggle to settings page"');
+        process.exit(1);
+      }
+
+      const specialists = discoverSpecialists(cwd);
+      if (specialists.length === 0) {
+        console.log("\nNo specialists found. Run 'bart install' to install skills.");
+        process.exit(1);
+      }
+
+      // Extract file hints from remaining args (if any after the description)
+      const fileHints = remainingArgs.slice(2);
+
+      const history = loadHistory(cwd);
+      const model = loadSpecialistModel(cwd);
+      const scored = scoreSpecialists(taskDescription, fileHints, specialists, history, model);
+
+      console.log(`\n🔍 Specialist suggestions for: "${taskDescription}"\n`);
+
+      if (scored.length === 0) {
+        console.log("  No specialists matched this task description.");
+        console.log("  Try adding more detail or check available specialists with 'bart specialists'.\n");
+        break;
+      }
+
+      const top = scored.slice(0, 10);
+      for (let i = 0; i < top.length; i++) {
+        const { specialist: s, confidence, rationale } = top[i];
+        const pct = Math.round(confidence * 100);
+        const bar = "█".repeat(Math.round(pct / 5)) + "░".repeat(20 - Math.round(pct / 5));
+        const typeLabel = s.type === "agent" ? "A" : s.type === "skill" ? "S" : "C";
+        console.log(`  ${i + 1}. [${typeLabel}] ${s.name}  ${bar}  ${pct}%`);
+        for (const r of rationale) {
+          console.log(`     → ${r}`);
+        }
+        if (i < top.length - 1) console.log("");
+      }
+      console.log("");
+      break;
+    }
 
     case "config":
       if (agentOverride) {

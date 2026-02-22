@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSy
 import { join } from "path";
 import { Task, Requirement } from "./constants.js";
 import { findFile } from "./tasks.js";
-import { discoverSpecialists, matchSpecialist } from "./specialists.js";
+import { discoverSpecialists, matchSpecialist, loadSpecialistModel } from "./specialists.js";
 
 function findLatestPlanInDirs(dirs: string[]): string | undefined {
   let latestPlan: { path: string; mtime: number } | null = null;
@@ -341,12 +341,13 @@ Example plan.md:
   const planContent = readFileSync(planPath, "utf-8");
   const { tasks, requirements } = parsePlanToTasks(planContent, cwd);
 
-  // Auto-assign specialists to tasks
+  // Auto-assign specialists to tasks (uses ML model when available [REQ-02])
   const specialists = discoverSpecialists(cwd);
   if (specialists.length > 0) {
+    const model = loadSpecialistModel(cwd);
     let assigned = 0;
     for (const task of tasks) {
-      const match = matchSpecialist(task, specialists);
+      const match = matchSpecialist(task, specialists, model);
       if (match) {
         task.specialist = match.name;
         assigned++;
