@@ -85,6 +85,13 @@ function formatDuration(ms: number): string {
   return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
 }
 
+export function formatTaskStarted(task: Task): string {
+  const specialist = task.specialist ? ` (${task.specialist})` : "";
+  return `🚀 *Task ${task.id} started*\n` +
+    `${task.title}${specialist}\n` +
+    `Workstream: ${task.workstream}`;
+}
+
 export function formatTaskCompleted(task: Task): string {
   const duration = task.started_at && task.completed_at
     ? formatDuration(new Date(task.completed_at).getTime() - new Date(task.started_at).getTime())

@@ -6,7 +6,7 @@ import { readTasks, findNextTask, getCwd, getTaskById, resolvePlanTasksPath } fr
 import { printStatus, printWorkstreamStatus, printRequirementsReport } from "./status.js";
 import { runDashboard } from "./dashboard.js";
 import { runPlanCommand } from "./plan.js";
-import { sendTelegram, sendTelegramTestMessage, formatTaskCompleted, formatTaskError, formatCriticalError, formatWorkstreamCompleted, formatWorkstreamBlocked, formatMilestone } from "./notify.js";
+import { sendTelegram, sendTelegramTestMessage, formatTaskStarted, formatTaskCompleted, formatTaskError, formatCriticalError, formatWorkstreamCompleted, formatWorkstreamBlocked, formatMilestone } from "./notify.js";
 import { discoverSpecialists, printSpecialists, parseFrontmatter, appendHistory, extractPlanSlug, countResetsForTask, countWorkstreamErrors, printSpecialistHistory, scoreSpecialists, loadHistory, recordPairing, loadSpecialistModel, printSpecialistBoard, generateSpecialistsSummary } from "./specialists.js";
 import { generateZshCompletion, generateBashCompletion, installCompletions } from "./completions.js";
 
@@ -42,6 +42,7 @@ function saveConfig(config: BartConfig) {
 
 // --- Graceful shutdown state ---
 const STOP_FILE = "stop";
+const LOCK_FILE = "bart.lock";
 let currentChild: ChildProcess | null = null;
 let currentTasksPath: string | null = null;
 let currentTaskId: string | null = null;
@@ -54,6 +55,49 @@ function checkStopSignal(cwd: string): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Write a lock file with the current PID so other bart processes
+ * can tell whether an in_progress task belongs to a live process.
+ */
+function acquireLock(cwd: string): void {
+  const lockPath = join(cwd, BART_DIR, LOCK_FILE);
+  try {
+    writeFileSync(lockPath, String(process.pid));
+  } catch {}
+}
+
+function releaseLock(cwd: string): void {
+  const lockPath = join(cwd, BART_DIR, LOCK_FILE);
+  try {
+    if (existsSync(lockPath)) {
+      const pid = readFileSync(lockPath, "utf-8").trim();
+      // Only remove if we own the lock
+      if (pid === String(process.pid)) {
+        unlinkSync(lockPath);
+      }
+    }
+  } catch {}
+}
+
+/**
+ * Check whether another bart process is actively running by reading
+ * the lock file and verifying the PID is alive.
+ */
+function isAnotherBartRunning(cwd: string): boolean {
+  const lockPath = join(cwd, BART_DIR, LOCK_FILE);
+  try {
+    if (!existsSync(lockPath)) return false;
+    const pid = parseInt(readFileSync(lockPath, "utf-8").trim(), 10);
+    if (isNaN(pid) || pid === process.pid) return false;
+    // Signal 0 tests whether the process exists without killing it
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    // process.kill throws if PID doesn't exist — stale lock
+    return false;
+  }
 }
 
 function resetInProgressTask(tasksPath: string, taskId: string) {
@@ -69,7 +113,7 @@ function resetInProgressTask(tasksPath: string, taskId: string) {
   } catch {}
 }
 
-function installSignalHandlers() {
+function installSignalHandlers(cwd: string) {
   const handler = (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -89,6 +133,8 @@ function installSignalHandlers() {
     if (currentTasksPath && currentTaskId) {
       resetInProgressTask(currentTasksPath, currentTaskId);
     }
+
+    releaseLock(cwd);
 
     // Give child a moment to exit, then force exit
     setTimeout(() => process.exit(130), 3500).unref();
@@ -290,16 +336,20 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
   
   const projectRoot = tasks.project_root || process.cwd();
   
-  console.log(`\n🚀 Starting task: ${taskId} — ${task.title}\n`);
+  console.log(`\n🚀 Starting task: ${taskId} — ${task.title}`);
+  console.log(`   Workstream: ${task.workstream}`);
   console.log(`📁 Working directory: ${projectRoot}\n`);
-  
+
   const tasksData = readTasks(tasksPath);
   const taskIndex = tasksData.tasks.findIndex(t => t.id === taskId);
   if (taskIndex !== -1) {
     tasksData.tasks[taskIndex].status = "in_progress";
     tasksData.tasks[taskIndex].started_at = new Date().toISOString();
     writeFileSync(tasksPath, JSON.stringify(tasksData, null, 2));
+    console.log(`   Status: ${taskId} → in_progress | Workstream ${task.workstream} → active\n`);
   }
+
+  await sendTelegram(formatTaskStarted(task));
   
   let agentConfig: { cmd: string; args: string[] };
   if (agentOverride) {
@@ -609,13 +659,14 @@ export async function main() {
       }
 
       // Install signal handlers for graceful shutdown
-      installSignalHandlers();
+      installSignalHandlers(cwd);
 
       // Clear any stale stop signal from a previous run
       checkStopSignal(cwd);
 
-      // Recover tasks stuck in_progress from a previous interrupted run
-      {
+      // Recover tasks stuck in_progress from a previous interrupted run,
+      // but only if no other bart process is actively running (PID lock check)
+      if (!isAnotherBartRunning(cwd)) {
         const recoveryTasks = readTasks(tasksPath);
         const stale = recoveryTasks.tasks.filter(t => t.status === "in_progress");
         if (stale.length > 0) {
@@ -627,10 +678,16 @@ export async function main() {
           }
           writeFileSync(tasksPath, JSON.stringify(recoveryTasks, null, 2));
         }
+      } else {
+        console.log(`\nℹ️  Another bart process is running — skipping stale task recovery`);
       }
+
+      // Acquire lock so other bart processes know we're running
+      acquireLock(cwd);
 
       if (specificTask) {
         await runAgent(specificTask, tasksPath, agentOverride, autoContinue);
+        releaseLock(cwd);
       } else {
         let running = true;
         let iterations = 0;
@@ -819,6 +876,8 @@ export async function main() {
           const summaryPath = join(bartDir, "specialists.md");
           writeFileSync(summaryPath, generateSpecialistsSummary(specialists, cwd));
         }
+
+        releaseLock(cwd);
       }
       break;
 
