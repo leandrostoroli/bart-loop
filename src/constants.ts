@@ -37,9 +37,15 @@ export interface Requirement {
 export interface Specialist {
   name: string;
   description: string;
-  type: "command" | "agent" | "skill";
+  type: "command" | "agent" | "skill" | "profile";
   path: string;           // Absolute path to the .md file
   tools?: string[];
+  role?: string;          // Profile role (e.g., "backend engineer", "QA lead")
+  skills?: string[];      // Referenced skill names (profile-specific)
+  standards?: string[];   // Referenced standards (profile-specific)
+  agents?: string[];      // Referenced agent names (profile-specific)
+  premises?: string;      // Content from profile body (guidelines, rules, standards)
+  learnings?: string[];   // Parsed learning entries appended over time
 }
 
 export interface TasksData {

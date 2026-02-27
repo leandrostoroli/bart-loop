@@ -3,6 +3,7 @@ import { join, basename, extname } from "path";
 import { Specialist, Task, HistoryEntry, HISTORY_FILE, BART_DIR } from "./constants.js";
 
 const HOME = process.env.HOME || "";
+const SPECIALISTS_DIR = "specialists";
 
 // --- ML-style Specialist Model [REQ-02] ---
 
@@ -245,6 +246,116 @@ export function parseFrontmatter(content: string): Record<string, any> {
 }
 
 /**
+ * Parse a profile markdown file into a Specialist with type "profile".
+ *
+ * Profile frontmatter schema:
+ *   name: string        — display name (required, falls back to filename)
+ *   role: string        — specialist role (e.g. "backend engineer")
+ *   description: string — short description for matching and display
+ *   skills: string[]    — referenced skill names to resolve at runtime
+ *   standards: string[] — coding standards or guidelines to follow
+ *   agents: string[]    — referenced agent names to resolve at runtime
+ *
+ * Body sections (parsed from markdown headings):
+ *   ## Premises  — guidelines, rules, and standards (stored in `premises`)
+ *   ## Learnings — auto-appended structured learning entries (stored in `learnings`)
+ *
+ * If no explicit ## Premises heading exists, all body content before ## Learnings
+ * is treated as premises (backward-compatible with free-form profile bodies).
+ */
+export function parseProfile(filePath: string): Specialist | null {
+  if (!existsSync(filePath)) return null;
+
+  const content = readFileSync(filePath, "utf-8");
+  const fm = parseFrontmatter(content);
+  const name = fm.name || basename(filePath, extname(filePath));
+  if (!name) return null;
+
+  // Parse list fields — accept YAML arrays or comma-separated strings
+  const toList = (val: unknown): string[] => {
+    if (Array.isArray(val)) return val.map(String);
+    if (typeof val === "string" && val.trim()) return val.split(/,\s*/);
+    return [];
+  };
+
+  const skills = toList(fm.skills);
+  const standards = toList(fm.standards);
+  const agents = toList(fm.agents);
+  const role = typeof fm.role === "string" ? fm.role.trim() : undefined;
+  const description = typeof fm.description === "string"
+    ? fm.description.split("\n")[0].trim()
+    : (role || "");
+  const tools = fm.tools || fm["allowed-tools"];
+
+  // Extract body content after frontmatter
+  const body = content.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
+
+  // Extract ## Premises section content (explicit heading)
+  const premisesMatch = body.match(/^## Premises\s*\n([\s\S]*?)(?=\n## |\s*$)/m);
+  let premises: string | undefined;
+  if (premisesMatch) {
+    premises = premisesMatch[1].trim() || undefined;
+  } else {
+    // Fallback: everything before ## Learnings is treated as premises
+    const learningsIdx = body.indexOf("## Learnings");
+    const fallback = learningsIdx >= 0 ? body.substring(0, learningsIdx) : body;
+    const trimmed = fallback.trim();
+    premises = trimmed || undefined;
+  }
+
+  // Extract ## Learnings section entries
+  const learnings: string[] = [];
+  const learningsIdx = body.indexOf("## Learnings");
+  if (learningsIdx >= 0) {
+    const learningsSection = body.substring(learningsIdx);
+    // Each learning entry starts with "- " and may have sub-items indented below
+    const entryBlocks = learningsSection
+      .replace(/^## Learnings\s*\n?/, "")
+      .split(/\n(?=- )/)
+      .map(e => e.trim())
+      .filter(Boolean);
+    learnings.push(...entryBlocks);
+  }
+
+  return {
+    name,
+    description,
+    type: "profile",
+    path: filePath,
+    role,
+    tools: Array.isArray(tools) ? tools : tools ? tools.split(/,\s*/) : undefined,
+    skills: skills.length > 0 ? skills : undefined,
+    standards: standards.length > 0 ? standards : undefined,
+    agents: agents.length > 0 ? agents : undefined,
+    premises,
+    learnings: learnings.length > 0 ? learnings : undefined,
+  };
+}
+
+/**
+ * Scan a directory for .md profile files and return specialist entries with type "profile".
+ */
+function scanProfileDirectory(dir: string): Specialist[] {
+  if (!existsSync(dir)) return [];
+  const specialists: Specialist[] = [];
+
+  try {
+    const entries = readdirSync(dir);
+    for (const entry of entries) {
+      if (!entry.endsWith(".md")) continue;
+      const fullPath = join(dir, entry);
+      const stat = statSync(fullPath);
+      if (!stat.isFile()) continue;
+
+      const profile = parseProfile(fullPath);
+      if (profile) specialists.push(profile);
+    }
+  } catch {}
+
+  return specialists;
+}
+
+/**
  * Scan a directory for .md files and return specialist entries.
  */
 function scanDirectory(dir: string, type: Specialist["type"]): Specialist[] {
@@ -390,7 +501,8 @@ function scanPlugins(pluginsDir: string): Specialist[] {
 
 /**
  * Discover all available specialists from Claude Code directories.
- * Scans project-local then global: commands, agents, plugins, skills.
+ * Scans project-local profiles first (.bart/specialists/), then global profiles (~/.bart/specialists/),
+ * then commands, agents, plugins, skills. Project-local profiles shadow global profiles by name.
  */
 export function discoverSpecialists(cwd?: string): Specialist[] {
   const projectRoot = cwd || process.cwd();
@@ -405,6 +517,10 @@ export function discoverSpecialists(cwd?: string): Specialist[] {
     }
   };
 
+  // 0. Project-local specialist profiles (.bart/specialists/*.md) — highest dedup priority
+  for (const s of scanProfileDirectory(join(projectRoot, BART_DIR, SPECIALISTS_DIR))) add(s);
+  // 0b. Global specialist profiles (~/.bart/specialists/*.md) — shadowed by project-local profiles
+  for (const s of scanProfileDirectory(join(HOME, BART_DIR, SPECIALISTS_DIR))) add(s);
   // 1. Project-local commands
   for (const s of scanDirectory(join(projectRoot, ".claude", "commands"), "command")) add(s);
   // 2. Project-local agents
@@ -449,11 +565,90 @@ export function discoverSpecialists(cwd?: string): Specialist[] {
  *
  * Matching strategy (in priority order):
  * 1. Explicit tag in task title: [specialist-name]
- * 2. ML model-based matching (if model has enough data) [REQ-02]
- * 3. File extension heuristics (.tsx → frontend specialists)
- * 4. Keyword matching between task description and specialist description
+ * 2. Profile-aware matching [REQ-06]: profiles whose declared skills/role match task keywords/files
+ * 3. ML model-based matching (if model has enough data) [REQ-02]
+ * 4. File extension heuristics (.tsx → frontend specialists)
+ * 5. Keyword matching between task description and specialist description
  */
 const AUTO_MATCH_CONFIDENCE_THRESHOLD = 80;
+
+/** File extension to skill keyword mapping for profile matching. */
+const EXT_SKILL_KEYWORDS: Record<string, string[]> = {
+  ".tsx": ["react", "frontend", "component", "ui"],
+  ".jsx": ["react", "frontend", "component", "ui"],
+  ".css": ["css", "style", "frontend", "design"],
+  ".scss": ["scss", "style", "frontend", "design"],
+  ".sql": ["sql", "database", "query"],
+  ".prisma": ["prisma", "database", "orm"],
+  ".test.ts": ["test", "testing", "spec", "qa"],
+  ".spec.ts": ["test", "testing", "spec", "qa"],
+  ".tf": ["terraform", "infrastructure", "deploy"],
+  ".yml": ["config", "ci", "deploy", "pipeline"],
+  ".yaml": ["config", "ci", "deploy", "pipeline"],
+};
+
+/**
+ * Score a profile specialist against a task based on declared skills, role, and standards.
+ * Returns a numeric score where higher = better match. Used by matchSpecialist tier 2.
+ */
+function scoreProfileMatch(profile: Specialist, taskWords: string[], taskExts: Set<string>): number {
+  let score = 0;
+
+  // Match declared skills against task keywords
+  for (const skill of profile.skills || []) {
+    const skillLower = skill.toLowerCase();
+    for (const word of taskWords) {
+      if (skillLower.includes(word) || word.includes(skillLower)) {
+        score++;
+        break;
+      }
+    }
+  }
+
+  // Match role against task keywords
+  if (profile.role) {
+    const roleWords = profile.role.toLowerCase().split(/\W+/).filter(w => w.length > 2);
+    for (const rw of roleWords) {
+      if (taskWords.includes(rw)) {
+        score++;
+      }
+    }
+  }
+
+  // Match standards against task keywords
+  for (const std of profile.standards || []) {
+    const stdLower = std.toLowerCase();
+    for (const word of taskWords) {
+      if (stdLower.includes(word) || word.includes(stdLower)) {
+        score++;
+        break;
+      }
+    }
+  }
+
+  // Match profile name against task keywords
+  const nameLower = profile.name.toLowerCase();
+  if (taskWords.includes(nameLower) || taskWords.some(w => nameLower.includes(w) && w.length > 3)) {
+    score += 2;
+  }
+
+  // Match profile skills/role against file extension keywords
+  for (const ext of taskExts) {
+    const kws = EXT_SKILL_KEYWORDS[ext];
+    if (!kws) continue;
+    for (const skill of profile.skills || []) {
+      if (kws.some(kw => skill.toLowerCase().includes(kw))) {
+        score++;
+        break;
+      }
+    }
+    if (profile.role && kws.some(kw => profile.role!.toLowerCase().includes(kw))) {
+      score++;
+    }
+  }
+
+  return score;
+}
 
 export function matchSpecialist(task: Task, specialists: Specialist[], model?: SpecialistModel): Specialist | null {
   if (specialists.length === 0) return null;
@@ -466,7 +661,34 @@ export function matchSpecialist(task: Task, specialists: Specialist[], model?: S
     if (found) return found;
   }
 
-  // 2. ML model-based matching [REQ-02]: use learned pairings if enough data
+  // 2. Profile-aware matching [REQ-06]: prefer curated profiles over auto-discovered specialists.
+  //    Check profile skills, role, standards, and name against task keywords and file extensions.
+  const profiles = specialists.filter(s => s.type === "profile");
+  if (profiles.length > 0) {
+    const taskWords = (task.title + " " + task.description)
+      .toLowerCase()
+      .split(/\W+/)
+      .filter(w => w.length > 2);
+    const taskExts = new Set((task.files || []).map(f => extname(f).toLowerCase()).filter(Boolean));
+
+    let bestProfile: Specialist | null = null;
+    let bestProfileScore = 0;
+
+    for (const p of profiles) {
+      const score = scoreProfileMatch(p, taskWords, taskExts);
+      if (score > bestProfileScore) {
+        bestProfileScore = score;
+        bestProfile = p;
+      }
+    }
+
+    // Require at least 2 signals to prefer a profile (avoids weak single-word matches)
+    if (bestProfile && bestProfileScore >= 2) {
+      return bestProfile;
+    }
+  }
+
+  // 3. ML model-based matching [REQ-02]: use learned pairings if enough data
   if (model && model.entries.length >= MIN_SAMPLES_FOR_TRUST) {
     const taskFeatures = extractTaskFeatures(task);
     let bestModelMatch: Specialist | null = null;
@@ -485,7 +707,7 @@ export function matchSpecialist(task: Task, specialists: Specialist[], model?: S
     }
   }
 
-  // 3. File extension heuristics
+  // 4. File extension heuristics
   const extKeywords: Record<string, string[]> = {
     ".tsx": ["frontend", "react", "ui", "component", "view"],
     ".jsx": ["frontend", "react", "ui", "component", "view"],
@@ -533,7 +755,7 @@ export function matchSpecialist(task: Task, specialists: Specialist[], model?: S
     }
   }
 
-  // 4. Keyword matching between task description and specialist description
+  // 5. Keyword matching between task description and specialist description
   const taskWords = (task.title + " " + task.description)
     .toLowerCase()
     .split(/\W+/)
@@ -571,6 +793,8 @@ export function printSpecialists(specialists: Specialist[]) {
   if (specialists.length === 0) {
     console.log("\nNo specialists found.");
     console.log("Specialists are discovered from:");
+    console.log("  .bart/specialists/     Project-local profiles (highest priority)");
+    console.log("  ~/.bart/specialists/   Global profiles (shadowed by project-local)");
     console.log("  ./.claude/commands/    Project-local commands");
     console.log("  ./.claude/agents/      Project-local agents");
     console.log("  ~/.claude/commands/    Global commands");
@@ -588,6 +812,7 @@ export function printSpecialists(specialists: Specialist[]) {
       case "agent": return "A";
       case "skill": return "S";
       case "command": return "C";
+      case "profile": return "P";
     }
   };
 
@@ -598,6 +823,14 @@ export function printSpecialists(specialists: Specialist[]) {
       : s.description;
     console.log(`  [${icon}] ${s.name}`);
     console.log(`      ${desc}`);
+    if (s.type === "profile") {
+      const skillsCount = (s.skills || []).length + (s.agents || []).length;
+      const learningsCount = (s.learnings || []).length;
+      const meta: string[] = [];
+      if (skillsCount > 0) meta.push(`${skillsCount} skill${skillsCount !== 1 ? "s" : ""}`);
+      meta.push(`${learningsCount} learning${learningsCount !== 1 ? "s" : ""}`);
+      console.log(`      ${meta.join(", ")}`);
+    }
     console.log(`      ${s.path}`);
   }
   console.log("");
@@ -930,12 +1163,23 @@ export function scoreSpecialists(
       }
     }
 
-    // 5. Type bonus (skills and agents tend to be more specialized)
-    if (s.type === "agent" || s.type === "skill") {
+    // 5. Type bonus (skills, agents, and profiles tend to be more specialized)
+    if (s.type === "agent" || s.type === "skill" || s.type === "profile") {
       score += 0.05;
     }
 
-    // 6. ML model-based scoring [REQ-02]: learned task-specialist pairings
+    // 6. Profile skills/role matching [REQ-06]: boost profiles whose declared metadata matches the task
+    if (s.type === "profile") {
+      const taskExts = new Set(files.map(f => extname(f).toLowerCase()).filter(Boolean));
+      const profileScore = scoreProfileMatch(s, taskWords, taskExts);
+      if (profileScore > 0) {
+        const profileBoost = Math.min(profileScore * 0.08, 0.3);
+        score += profileBoost;
+        rationale.push(`Profile match: ${profileScore} signal${profileScore > 1 ? "s" : ""} from skills/role/standards`);
+      }
+    }
+
+    // 7. ML model-based scoring [REQ-02]: learned task-specialist pairings
     if (model && model.entries.length > 0) {
       const taskFeatures: TaskFeatures = {
         extensions: [...new Set(files.map(f => extname(f)).filter(Boolean))],
@@ -971,6 +1215,181 @@ function formatDuration(ms: number): string {
   const mins = Math.floor(ms / 60000);
   const secs = Math.round((ms % 60000) / 1000);
   return `${mins}m${secs}s`;
+}
+
+// --- Profile Learning [REQ-04] ---
+
+export interface LearningOutcome {
+  success: boolean;
+  error?: string;
+  durationMs: number | null;
+  filesModified: string[];
+  notes?: string;
+}
+
+/**
+ * Append a structured learning entry to a specialist profile's ## Learnings section.
+ * If the section doesn't exist, it is created at the end of the file.
+ * Called after task completion (success or error) from the task completion handler in cli.ts.
+ */
+export function appendProfileLearning(
+  task: Task,
+  outcome: LearningOutcome,
+  cwd: string,
+): void {
+  if (!task.specialist) return;
+
+  // Find the specialist's profile path
+  const specialists = discoverSpecialists(cwd);
+  const specialist = specialists.find(s => s.name === task.specialist);
+  if (!specialist || !specialist.path) return;
+  if (!existsSync(specialist.path)) return;
+
+  const date = new Date().toISOString().split("T")[0];
+  const status = outcome.success ? "success" : "error";
+  const duration = outcome.durationMs != null ? formatDuration(outcome.durationMs) : "n/a";
+  const files = outcome.filesModified.length > 0
+    ? outcome.filesModified.map(f => `\`${f}\``).join(", ")
+    : "none";
+
+  const entryLines: string[] = [
+    `- **${date}** | ${task.title} | ${status} | ${duration} | Files: ${files}`,
+  ];
+  if (outcome.error) {
+    entryLines.push(`  - Error: ${outcome.error}`);
+  }
+  if (outcome.notes) {
+    entryLines.push(`  - Notes: ${outcome.notes}`);
+  }
+
+  const entry = entryLines.join("\n");
+
+  let content = readFileSync(specialist.path, "utf-8");
+
+  const learningsHeader = /^## Learnings$/m;
+  if (learningsHeader.test(content)) {
+    // Find the position right after "## Learnings" line (and any blank line following it)
+    const match = content.match(/^## Learnings\n*/m);
+    if (match && match.index != null) {
+      const insertPos = match.index + match[0].length;
+      content = content.slice(0, insertPos) + entry + "\n" + content.slice(insertPos);
+    }
+  } else {
+    // Append a new ## Learnings section at the end
+    const separator = content.endsWith("\n") ? "\n" : "\n\n";
+    content += `${separator}## Learnings\n\n${entry}\n`;
+  }
+
+  writeFileSync(specialist.path, content);
+}
+
+
+/**
+ * Resolve rich prompt context for a specialist, including profile premises,
+ * resolved skill/agent contents, and recent learnings [REQ-03].
+ *
+ * For profile-type specialists:
+ *   1. Parses the profile file for fresh premises and learnings
+ *   2. For each skill name in the profile's `skills` array, finds the matching
+ *      specialist in `allSpecialists` and reads its file content
+ *   3. For each agent name in the profile's `agents` array, does the same
+ *   4. Returns composed context: premises + resolved skills + resolved agents + learnings
+ *
+ * For non-profile specialists, falls back to description.
+ * Returns a formatted string suitable for injection into the agent prompt.
+ */
+export function resolveProfileContext(specialist: Specialist, allSpecialists?: Specialist[]): string {
+  const lines: string[] = [];
+  lines.push(`Specialist: ${specialist.name} (${specialist.type})`);
+
+  // For profiles, re-parse the file to get fresh premises + learnings
+  if (specialist.type === "profile" && specialist.path) {
+    const profile = parseProfile(specialist.path);
+    if (profile) {
+      if (profile.premises) {
+        lines.push("");
+        lines.push("## Guidelines & Standards");
+        lines.push(profile.premises);
+      }
+
+      // Resolve referenced skills [REQ-03]
+      const skillNames = profile.skills || [];
+      if (skillNames.length > 0 && allSpecialists) {
+        const resolvedSkills = resolveReferencedSpecialists(skillNames, allSpecialists);
+        if (resolvedSkills.length > 0) {
+          lines.push("");
+          lines.push("## Skills");
+          for (const { name, content } of resolvedSkills) {
+            lines.push("");
+            lines.push(`### ${name}`);
+            lines.push(content);
+          }
+        }
+      }
+
+      // Resolve referenced agents [REQ-03]
+      const agentNames = profile.agents || [];
+      if (agentNames.length > 0 && allSpecialists) {
+        const resolvedAgents = resolveReferencedSpecialists(agentNames, allSpecialists);
+        if (resolvedAgents.length > 0) {
+          lines.push("");
+          lines.push("## Agents");
+          for (const { name, content } of resolvedAgents) {
+            lines.push("");
+            lines.push(`### ${name}`);
+            lines.push(content);
+          }
+        }
+      }
+
+      if (profile.learnings && profile.learnings.length > 0) {
+        const recent = profile.learnings.slice(-10);
+        lines.push("");
+        lines.push("## Recent Learnings (last 10)");
+        for (const entry of recent) {
+          lines.push(`- ${entry}`);
+        }
+      }
+
+      return lines.join("\n");
+    }
+  }
+
+  // Fallback for non-profile specialists or parse failure
+  lines.push(`Specialist context: ${specialist.description}`);
+  return lines.join("\n");
+}
+
+/**
+ * Look up specialists by name from the full list and read their file contents.
+ * Returns an array of { name, content } for each successfully resolved reference.
+ * Strips frontmatter from the content so only the body is included.
+ */
+function resolveReferencedSpecialists(
+  names: string[],
+  allSpecialists: Specialist[],
+): { name: string; content: string }[] {
+  const results: { name: string; content: string }[] = [];
+
+  for (const refName of names) {
+    const match = allSpecialists.find(
+      s => s.name.toLowerCase() === refName.toLowerCase(),
+    );
+    if (!match || !match.path || !existsSync(match.path)) continue;
+
+    try {
+      const raw = readFileSync(match.path, "utf-8");
+      // Strip frontmatter (--- ... ---) to keep only body content
+      const body = raw.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "").trim();
+      if (body) {
+        results.push({ name: match.name, content: body });
+      }
+    } catch {
+      // Skip unreadable files silently
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -1023,6 +1442,7 @@ export function printSpecialistBoard(specialists: Specialist[], cwd: string): vo
       case "agent": return "A";
       case "skill": return "S";
       case "command": return "C";
+      case "profile": return "P";
     }
   };
 
@@ -1037,8 +1457,23 @@ export function printSpecialistBoard(specialists: Specialist[], cwd: string): vo
     return `${diffDays}d ago`;
   };
 
-  const printRow = (name: string, type: string, done: string, rate: string, avgTime: string, resets: string, last: string) => {
-    console.log(`  [${type}] ${name.padEnd(24)} ${done.padStart(5)}  ${rate.padStart(6)}  ${avgTime.padStart(9)}  ${resets.padStart(7)}  ${last.padStart(8)}`);
+  const getProfileMeta = (s: Specialist): string | undefined => {
+    if (s.type !== "profile") return undefined;
+    const skillsCount = (s.skills || []).length + (s.agents || []).length;
+    const learningsCount = (s.learnings || []).length;
+    const parts: string[] = [];
+    if (skillsCount > 0) parts.push(`${skillsCount} skill${skillsCount !== 1 ? "s" : ""}`);
+    parts.push(`${learningsCount} learning${learningsCount !== 1 ? "s" : ""}`);
+    return parts.join(", ");
+  };
+
+  const printRow = (s: Specialist, done: string, rate: string, avgTime: string, resets: string, last: string) => {
+    const type = typeIcon(s.type);
+    console.log(`  [${type}] ${s.name.padEnd(24)} ${done.padStart(5)}  ${rate.padStart(6)}  ${avgTime.padStart(9)}  ${resets.padStart(7)}  ${last.padStart(8)}`);
+    const meta = getProfileMeta(s);
+    if (meta) {
+      console.log(`        ${meta}`);
+    }
   };
 
   const printHeader = () => {
@@ -1054,7 +1489,7 @@ export function printSpecialistBoard(specialists: Specialist[], cwd: string): vo
     for (const { s, stats, last } of effective) {
       const rate = `${Math.round((stats.completed / stats.total) * 100)}%`;
       const avgTime = stats.avg_duration_ms != null ? formatDuration(stats.avg_duration_ms) : "—";
-      printRow(s.name, typeIcon(s.type), String(stats.completed), rate, avgTime, String(stats.total_resets), formatLast(last));
+      printRow(s, String(stats.completed), rate, avgTime, String(stats.total_resets), formatLast(last));
     }
     console.log("");
   }
@@ -1065,7 +1500,7 @@ export function printSpecialistBoard(specialists: Specialist[], cwd: string): vo
     for (const { s, stats, last } of needsAttention) {
       const rate = stats.total > 0 ? `${Math.round((stats.completed / stats.total) * 100)}%` : "—";
       const avgTime = stats.avg_duration_ms != null ? formatDuration(stats.avg_duration_ms) : "—";
-      printRow(s.name, typeIcon(s.type), String(stats.completed), rate, avgTime, String(stats.total_resets), formatLast(last));
+      printRow(s, String(stats.completed), rate, avgTime, String(stats.total_resets), formatLast(last));
     }
     console.log("");
   }
@@ -1078,7 +1513,7 @@ export function printSpecialistBoard(specialists: Specialist[], cwd: string): vo
       const rate = stats && stats.total > 0 ? `${Math.round((stats.completed / stats.total) * 100)}%` : "—";
       const avgTime = stats?.avg_duration_ms != null ? formatDuration(stats.avg_duration_ms) : "—";
       const resets = stats ? String(stats.total_resets) : "0";
-      printRow(s.name, typeIcon(s.type), done, rate, avgTime, resets, formatLast(last));
+      printRow(s, done, rate, avgTime, resets, formatLast(last));
     }
     console.log("");
   }

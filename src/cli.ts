@@ -7,7 +7,7 @@ import { printStatus, printWorkstreamStatus, printRequirementsReport } from "./s
 import { runDashboard } from "./dashboard.js";
 import { runPlanCommand } from "./plan.js";
 import { sendTelegram, sendTelegramTestMessage, formatTaskStarted, formatTaskCompleted, formatTaskError, formatCriticalError, formatWorkstreamCompleted, formatWorkstreamBlocked, formatMilestone } from "./notify.js";
-import { discoverSpecialists, printSpecialists, parseFrontmatter, appendHistory, extractPlanSlug, countResetsForTask, countWorkstreamErrors, printSpecialistHistory, scoreSpecialists, loadHistory, recordPairing, loadSpecialistModel, printSpecialistBoard, generateSpecialistsSummary } from "./specialists.js";
+import { discoverSpecialists, printSpecialists, appendHistory, extractPlanSlug, countResetsForTask, countWorkstreamErrors, printSpecialistHistory, scoreSpecialists, loadHistory, recordPairing, loadSpecialistModel, printSpecialistBoard, generateSpecialistsSummary, appendProfileLearning, resolveProfileContext } from "./specialists.js";
 import { generateZshCompletion, generateBashCompletion, installCompletions } from "./completions.js";
 
 const CONFIG_DIR = join(process.env.HOME || "", ".bart");
@@ -269,6 +269,7 @@ Usage:
   bart requirements --gaps  Show only uncovered/partial requirements
   bart suggest "<task>"  Suggest best specialists for a task description
   bart specialists            List discovered specialists (skills, agents, commands)
+  bart specialists new        Create a new specialist profile (guided)
   bart specialists --board    Show specialist board grouped by effectiveness
   bart specialists --history  Show specialist performance from execution history
   bart stop              Send stop signal to a running 'bart run' (from another terminal)
@@ -373,15 +374,8 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
     const specialists = discoverSpecialists(projectRoot);
     const specialist = specialists.find(s => s.name === task.specialist);
     if (specialist) {
-      try {
-        const content = readFileSync(specialist.path, "utf-8");
-        const fm = parseFrontmatter(content);
-        const desc = fm.description || specialist.description;
-        specialistContext = `\nSpecialist: ${specialist.name} (${specialist.type})\nSpecialist context: ${desc}\n`;
-        console.log(`   Specialist: ${specialist.name} (${specialist.type})\n`);
-      } catch {
-        specialistContext = `\nSpecialist: ${specialist.name} (${specialist.type})\nSpecialist context: ${specialist.description}\n`;
-      }
+      specialistContext = "\n" + resolveProfileContext(specialist, specialists) + "\n";
+      console.log(`   Specialist: ${specialist.name} (${specialist.type})\n`);
     }
   }
 
@@ -452,6 +446,14 @@ Please complete this task.`;
       // Record failed pairing in specialist model [REQ-02]
       recordPairing(projectRoot, errTask, false);
 
+      // Record learning in specialist profile [REQ-04]
+      appendProfileLearning(errTask, {
+        success: false,
+        error: `Agent exited with code ${exitCode}`,
+        durationMs: errTask.started_at ? Date.now() - new Date(errTask.started_at).getTime() : null,
+        filesModified: errTask.files_modified || [],
+      }, projectRoot);
+
       // Send error notification [REQ-05]
       await sendTelegram(formatTaskError(errTask, resets + 1));
 
@@ -502,6 +504,13 @@ Please complete this task.`;
 
     // Record successful pairing in specialist model [REQ-02]
     recordPairing(projectRoot, completedTask, true);
+
+    // Record learning in specialist profile [REQ-04]
+    appendProfileLearning(completedTask, {
+      success: true,
+      durationMs: completedTask.started_at ? Date.now() - new Date(completedTask.started_at).getTime() : null,
+      filesModified: completedTask.files_modified || [],
+    }, projectRoot);
 
     await sendTelegram(formatTaskCompleted(completedTask));
 
@@ -928,6 +937,7 @@ export async function main() {
       const skills = [
         { src: join(packageRoot, "skills", "bart-plan", "SKILL.md"), dir: join(claudeSkillsDir, "bart-plan"), name: "bart-plan" },
         { src: join(packageRoot, "skills", "bart-think", "SKILL.md"), dir: join(claudeSkillsDir, "bart-think"), name: "bart-think" },
+        { src: join(packageRoot, "skills", "bart-new-specialist", "SKILL.md"), dir: join(claudeSkillsDir, "bart-new-specialist"), name: "bart-new-specialist" },
         { src: join(packageRoot, "SKILL.md"), dir: join(claudeSkillsDir, "bart-loop"), name: "bart-loop" },
       ];
 
@@ -1133,7 +1143,38 @@ export async function main() {
       break;
 
     case "specialists":
-      {
+      if (specificTask === "new") {
+        // Launch guided specialist creation via bart-new-specialist skill
+        const newSpecSkillPath = join(process.env.HOME || "", ".claude", "skills", "bart-new-specialist", "SKILL.md");
+        if (!existsSync(newSpecSkillPath)) {
+          console.log("⚠️  bart-new-specialist skill not found. Run 'bart install' first.");
+          process.exit(1);
+        }
+
+        console.log("\n🧑‍🔬 Starting specialist creation session...");
+        console.log("This will guide you through creating a new specialist profile.\n");
+
+        const specConfig = loadConfig();
+        let specCmd: string;
+        let specArgs: string[];
+
+        if (specConfig.agent === "claude") {
+          specCmd = "claude";
+          specArgs = ["--dangerously-skip-permissions", "/bart-new-specialist"];
+        } else {
+          specCmd = "opencode";
+          specArgs = [];
+        }
+
+        const specChild = spawn(specCmd, specArgs, {
+          cwd,
+          stdio: "inherit"
+        });
+
+        await new Promise<void>((resolve) => {
+          specChild.on("close", () => resolve());
+        });
+      } else {
         const specialists = discoverSpecialists(cwd);
         if (showBoard) {
           printSpecialistBoard(specialists, cwd);
@@ -1185,7 +1226,7 @@ export async function main() {
         const { specialist: s, confidence, rationale } = top[i];
         const pct = Math.round(confidence * 100);
         const bar = "█".repeat(Math.round(pct / 5)) + "░".repeat(20 - Math.round(pct / 5));
-        const typeLabel = s.type === "agent" ? "A" : s.type === "skill" ? "S" : "C";
+        const typeLabel = s.type === "agent" ? "A" : s.type === "skill" ? "S" : s.type === "profile" ? "P" : "C";
         console.log(`  ${i + 1}. [${typeLabel}] ${s.name}  ${bar}  ${pct}%`);
         for (const r of rationale) {
           console.log(`     → ${r}`);

@@ -98,9 +98,15 @@ _bart() {
           _describe -t subcommands 'completions subcommand' subcommands
           ;;
         specialists)
+          local -a spec_subcommands
+          spec_subcommands=(
+            'new:Create a new specialist profile (guided)'
+          )
           _arguments \\
             \$global_flags[@] \\
-            '--history[Show specialist performance from execution history]'
+            '--history[Show specialist performance from execution history]' \\
+            '--board[Show specialist board grouped by effectiveness]' \\
+            '1:subcommand:_describe -t spec_subcommands "specialists subcommand" spec_subcommands'
           ;;
         requirements|reqs)
           _arguments \\
@@ -346,7 +352,11 @@ _bart() {
       COMPREPLY=( $(compgen -W "zsh bash install" -- "$cur") )
       ;;
     specialists)
-      COMPREPLY=( $(compgen -W "$global_flags --history" -- "$cur") )
+      if [[ "$cur" == -* ]]; then
+        COMPREPLY=( $(compgen -W "$global_flags --history --board" -- "$cur") )
+      else
+        COMPREPLY=( $(compgen -W "new" -- "$cur") )
+      fi
       ;;
     requirements|reqs)
       COMPREPLY=( $(compgen -W "$global_flags --gaps" -- "$cur") )
