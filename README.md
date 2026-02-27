@@ -131,7 +131,10 @@ bart run --workstream B
 | `bart convert` | Convert latest plan to bart tasks |
 | `bart requirements` | Show requirements coverage report |
 | `bart specialists` | List discovered specialists |
+| `bart specialists new` | Create a new specialist profile (guided) |
+| `bart specialists --board` | Show specialist board by effectiveness |
 | `bart specialists --history` | Show specialist execution history |
+| `bart suggest "<task>"` | Suggest best specialists for a task |
 | `bart reset A1` | Reset task A1 to pending |
 | `bart completions install` | Install shell tab-completions |
 | `bart install` | Install skills and shell completions |
@@ -271,11 +274,31 @@ your-project/
 
 ## Specialists
 
-Bart discovers available AI specialists (skills, agents, CLI tools) and can route tasks to them:
+Bart discovers available AI specialists (skills, agents, CLI tools, profiles) and can route tasks to them:
 
 ```bash
-bart specialists
+bart specialists              # List all discovered specialists
+bart specialists --board      # See effectiveness rankings
+bart suggest "build auth"     # Get specialist recommendations for a task
 ```
+
+### Specialist Profiles
+
+Profiles are reusable specialist definitions with domain knowledge, coding standards, and learned patterns. They live as markdown files in `specialists/` (project-level) or `~/.bart/specialists/` (global).
+
+Create one interactively:
+
+```bash
+bart specialists new
+```
+
+Profiles include:
+- **Role & description** — What the specialist does
+- **Skills & agents** — Referenced tools the specialist uses
+- **Premises** — Domain rules, patterns, and standards
+- **Learnings** — Auto-appended entries from task execution (successes and failures)
+
+Bart injects the matched specialist's profile context into agent prompts during task execution, and records learnings back into the profile after each run — so specialists get better over time.
 
 ---
 
