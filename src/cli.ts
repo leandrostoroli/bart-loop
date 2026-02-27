@@ -270,6 +270,8 @@ Usage:
   bart suggest "<task>"  Suggest best specialists for a task description
   bart specialists            List discovered specialists (skills, agents, commands)
   bart specialists new        Create a new specialist profile (guided)
+  bart specialists git        Discover standards from git history & PR reviews
+  bart specialists git --since 3m  Scan last 3 months (default: 6m)
   bart specialists --board    Show specialist board grouped by effectiveness
   bart specialists --history  Show specialist performance from execution history
   bart stop              Send stop signal to a running 'bart run' (from another terminal)
@@ -938,6 +940,7 @@ export async function main() {
         { src: join(packageRoot, "skills", "bart-plan", "SKILL.md"), dir: join(claudeSkillsDir, "bart-plan"), name: "bart-plan" },
         { src: join(packageRoot, "skills", "bart-think", "SKILL.md"), dir: join(claudeSkillsDir, "bart-think"), name: "bart-think" },
         { src: join(packageRoot, "skills", "bart-new-specialist", "SKILL.md"), dir: join(claudeSkillsDir, "bart-new-specialist"), name: "bart-new-specialist" },
+        { src: join(packageRoot, "skills", "bart-specialists-git", "SKILL.md"), dir: join(claudeSkillsDir, "bart-specialists-git"), name: "bart-specialists-git" },
         { src: join(packageRoot, "SKILL.md"), dir: join(claudeSkillsDir, "bart-loop"), name: "bart-loop" },
       ];
 
@@ -1173,6 +1176,41 @@ export async function main() {
 
         await new Promise<void>((resolve) => {
           specChild.on("close", () => resolve());
+        });
+      } else if (specificTask === "git") {
+        // Launch git-based specialist discovery via bart-specialists-git skill
+        const gitSpecSkillPath = join(process.env.HOME || "", ".claude", "skills", "bart-specialists-git", "SKILL.md");
+        if (!existsSync(gitSpecSkillPath)) {
+          console.log("⚠️  bart-specialists-git skill not found. Run 'bart install' first.");
+          process.exit(1);
+        }
+
+        console.log("\n🔍 Starting git standards analysis...");
+        console.log("This will scan PR reviews and commit history to discover engineering standards.\n");
+
+        const gitSpecConfig = loadConfig();
+        let gitSpecCmd: string;
+        let gitSpecArgs: string[];
+
+        // Pass --since flag through if present
+        const sinceIdx = args.indexOf("--since");
+        const sinceArg = sinceIdx !== -1 && args[sinceIdx + 1] ? `--since ${args[sinceIdx + 1]}` : "";
+
+        if (gitSpecConfig.agent === "claude") {
+          gitSpecCmd = "claude";
+          gitSpecArgs = ["--dangerously-skip-permissions", `/bart-specialists-git${sinceArg ? " " + sinceArg : ""}`];
+        } else {
+          gitSpecCmd = "opencode";
+          gitSpecArgs = [];
+        }
+
+        const gitSpecChild = spawn(gitSpecCmd, gitSpecArgs, {
+          cwd,
+          stdio: "inherit"
+        });
+
+        await new Promise<void>((resolve) => {
+          gitSpecChild.on("close", () => resolve());
         });
       } else {
         const specialists = discoverSpecialists(cwd);

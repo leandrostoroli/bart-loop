@@ -101,6 +101,7 @@ _bart() {
           local -a spec_subcommands
           spec_subcommands=(
             'new:Create a new specialist profile (guided)'
+            'git:Discover standards from git history & PR reviews'
           )
           _arguments \\
             \$global_flags[@] \\
@@ -355,7 +356,7 @@ _bart() {
       if [[ "$cur" == -* ]]; then
         COMPREPLY=( $(compgen -W "$global_flags --history --board" -- "$cur") )
       else
-        COMPREPLY=( $(compgen -W "new" -- "$cur") )
+        COMPREPLY=( $(compgen -W "new git" -- "$cur") )
       fi
       ;;
     requirements|reqs)

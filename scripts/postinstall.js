@@ -25,6 +25,7 @@ const skills = [
   [join("skills", "bart-plan", "SKILL.md"), "bart-plan"],
   [join("skills", "bart-think", "SKILL.md"), "bart-think"],
   [join("skills", "bart-new-specialist", "SKILL.md"), "bart-new-specialist"],
+  [join("skills", "bart-specialists-git", "SKILL.md"), "bart-specialists-git"],
 ];
 
 // --- Skills Installation ---
