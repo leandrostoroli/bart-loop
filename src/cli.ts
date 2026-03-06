@@ -1477,11 +1477,22 @@ export async function main() {
       function spawnCollabInTmux(cmd: string): void {
         const sessionCheck = tmuxSpawn("tmux", ["has-session", "-t", collabSessionName], { stdio: "ignore" });
         const sessionExists = sessionCheck.status === 0;
+
+        // Kill any stale collab window from a previous run so we get a fresh one
+        // and switch-client reliably lands on the new process.
+        if (sessionExists) {
+          tmuxSpawn("tmux", ["kill-window", "-t", `${collabSessionName}:${collabWindowName}`], { stdio: "ignore" });
+        }
+
         if (sessionExists) {
           tmuxSpawn("tmux", ["new-window", "-t", collabSessionName, "-n", collabWindowName, cmd], { stdio: "ignore" });
         } else {
           tmuxSpawn("tmux", ["new-session", "-d", "-s", collabSessionName, "-n", collabWindowName, cmd], { stdio: "ignore" });
         }
+
+        // Keep the window alive on exit so any crash/error output stays readable.
+        tmuxSpawn("tmux", ["set-window-option", "-t", `${collabSessionName}:${collabWindowName}`, "remain-on-exit", "on"], { stdio: "ignore" });
+
         console.log(`\nAttaching to tmux session '${collabSessionName}' (Ctrl+B, D to detach)\n`);
         if (process.env.TMUX) {
           tmuxSpawn("tmux", ["switch-client", "-t", `${collabSessionName}:${collabWindowName}`], { stdio: "inherit" });
@@ -1498,6 +1509,12 @@ export async function main() {
 
         const session = new CollabSession();
         const code = await session.host();
+
+        // Show the join code in the tmux tab so it's always visible.
+        if (process.env.TMUX) {
+          tmuxSpawn("tmux", ["rename-window", "-t", `${collabSessionName}:${collabWindowName}`, `collab·${code}`], { stdio: "ignore" });
+        }
+
         console.log(`\nCollab session started.`);
         console.log(`Join code: ${code}`);
         console.log(`\nShare this code with teammates. They can join with:\n  bart collab join ${code}\n`);
