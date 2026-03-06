@@ -1468,7 +1468,7 @@ export async function main() {
       
     case "collab": {
       const subcommand = remainingArgs[1];
-      const isForeground = remainingArgs.includes("--foreground");
+      const isForeground = args.includes("--foreground");
       const { spawnSync: tmuxSpawn } = require("child_process");
       const bartBin = `${process.execPath} ${process.argv[1]}`;
       const collabSessionName = "bart";
@@ -1503,17 +1503,35 @@ export async function main() {
 
       if (subcommand === "start") {
         if (!isForeground) {
-          spawnCollabInTmux(`${bartBin} collab start --foreground`);
+          // Spawn the session in the background and read the join code from its stdout.
+          const child = spawn(process.execPath, [process.argv[1], "collab", "start", "--foreground"], {
+            detached: true,
+            stdio: ["ignore", "pipe", "ignore"],
+          });
+
+          await new Promise<void>((resolve, reject) => {
+            let buf = "";
+            child.stdout!.on("data", (chunk: Buffer) => {
+              buf += chunk.toString();
+              const m = buf.match(/Join code: ([A-Z0-9]{6})/);
+              if (m) {
+                console.log(`\nCollab session started in background (pid ${child.pid}).`);
+                console.log(`Join code: ${m[1]}`);
+                console.log(`\nShare this code with teammates. They can join with:\n  bart collab join ${m[1]}\n`);
+                resolve();
+              }
+            });
+            child.once("error", reject);
+            child.once("exit", (code) => reject(new Error(`collab process exited with code ${code}`)));
+          });
+
+          child.stdout!.unref();
+          child.unref();
           break;
         }
 
         const session = new CollabSession();
         const code = await session.host();
-
-        // Show the join code in the tmux tab so it's always visible.
-        if (process.env.TMUX) {
-          tmuxSpawn("tmux", ["rename-window", "-t", `${collabSessionName}:${collabWindowName}`, `collab·${code}`], { stdio: "ignore" });
-        }
 
         console.log(`\nCollab session started.`);
         console.log(`Join code: ${code}`);
