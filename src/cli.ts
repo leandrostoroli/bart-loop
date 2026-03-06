@@ -1470,7 +1470,7 @@ export async function main() {
       const subcommand = remainingArgs[1];
       const isForeground = remainingArgs.includes("--foreground");
       const { spawnSync: tmuxSpawn } = require("child_process");
-      const bartBin = process.argv[1];
+      const bartBin = `${process.execPath} ${process.argv[1]}`;
       const collabSessionName = "bart";
       const collabWindowName = "collab";
 
