@@ -9,6 +9,7 @@ import { runPlanCommand } from "./plan.js";
 import { sendTelegram, sendTelegramTestMessage, formatTaskStarted, formatTaskCompleted, formatTaskError, formatCriticalError, formatWorkstreamCompleted, formatWorkstreamBlocked, formatMilestone } from "./notify.js";
 import { discoverSpecialists, printSpecialists, appendHistory, extractPlanSlug, countResetsForTask, countWorkstreamErrors, printSpecialistHistory, scoreSpecialists, loadHistory, recordPairing, loadSpecialistModel, printSpecialistBoard, generateSpecialistsSummary, appendProfileLearning, resolveProfileContext } from "./specialists.js";
 import { generateZshCompletion, generateBashCompletion, installCompletions } from "./completions.js";
+import { CollabSession } from "./collab/session.js";
 
 const CONFIG_DIR = join(process.env.HOME || "", ".bart");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -281,6 +282,8 @@ Usage:
   bart completions install  Auto-detect shell and install completions
   bart install           Install bart skills and shell completions
   bart init              Initialize bart in current project
+  bart collab start      Start a collab session; prints a 6-char join code
+  bart collab join <code>  Join a collab session by join code (mDNS discovery)
   bart config            Show current config
   bart config --agent <name>  Set default agent (claude, opencode)
   bart config --telegram         Setup Telegram notifications
@@ -294,6 +297,7 @@ Options:
   --agent <name>         Agent to use (claude, opencode)
   --auto-continue        Auto-continue to next task (default: true)
   --no-auto-continue     Ask before continuing to next task
+  --tmux                 Run each workstream in a separate tmux window
 
 Plan Resolution:
   Tasks are resolved in this order:
@@ -311,6 +315,7 @@ Examples:
   bart run A1                    # Run specific task
   bart run --agent claude        # Run with claude, auto-continue
   bart run --no-auto-continue    # Ask before each task
+  bart run --tmux                # Run workstreams in parallel tmux windows
   bart dashboard                 # Open TUI dashboard
   bart plan                      # Generate tasks from plan.md
   bart config --agent claude     # Set default agent to claude
@@ -570,6 +575,65 @@ Please complete this task.`;
   return true;
 }
 
+async function runWithTmux(
+  tasksPath: string,
+  cwd: string,
+  workstream?: string,
+  agentOverride?: string,
+  autoContinue?: boolean,
+  tasksFlag?: string,
+  planSlug?: string
+): Promise<void> {
+  const { spawnSync } = require("child_process");
+  const bartBin = process.argv[1];
+
+  const tasks = readTasks(tasksPath);
+  const workstreams: string[] = workstream
+    ? [workstream]
+    : [...new Set(
+        tasks.tasks
+          .filter(t => t.status !== "completed" && t.status !== "error")
+          .map(t => t.workstream)
+          .filter(Boolean)
+      )] as string[];
+
+  if (workstreams.length === 0) {
+    console.log("No pending workstreams to run in tmux.");
+    return;
+  }
+
+  // Build flags to forward to each per-workstream invocation
+  const baseFlags: string[] = [];
+  if (tasksFlag) baseFlags.push("--tasks", tasksFlag);
+  else if (planSlug) baseFlags.push("--plan", planSlug);
+  if (agentOverride) baseFlags.push("--agent", agentOverride);
+  if (autoContinue === true) baseFlags.push("--auto-continue");
+  if (autoContinue === false) baseFlags.push("--no-auto-continue");
+
+  const sessionName = "bart";
+
+  const sessionCheck = spawnSync("tmux", ["has-session", "-t", sessionName], { stdio: "ignore" });
+  const sessionExists = sessionCheck.status === 0;
+
+  for (let i = 0; i < workstreams.length; i++) {
+    const ws = workstreams[i];
+    const windowName = `ws-${ws}`;
+    const cmd = [bartBin, "run", "--workstream", ws, ...baseFlags].join(" ");
+
+    if (i === 0 && !sessionExists) {
+      spawnSync("tmux", ["new-session", "-d", "-s", sessionName, "-n", windowName, cmd], { stdio: "ignore" });
+    } else {
+      spawnSync("tmux", ["new-window", "-t", sessionName, "-n", windowName, cmd], { stdio: "ignore" });
+    }
+  }
+
+  console.log(`\n   Launched ${workstreams.length} tmux window(s) in session '${sessionName}'`);
+  console.log(`   Workstreams: ${workstreams.join(", ")}`);
+  console.log(`\nAttaching to tmux session '${sessionName}'... (Ctrl+B, D to detach)`);
+
+  spawnSync("tmux", ["attach-session", "-t", sessionName], { stdio: "inherit" });
+}
+
 export async function main() {
   const args = process.argv.slice(2);
   const cwd = getCwd();
@@ -585,6 +649,7 @@ export async function main() {
   let telegramSetup = false;
   let showHistory = false;
   let showBoard = false;
+  let useTmux = false;
 
   const remainingArgs: string[] = [];
   let skipNext = false;
@@ -617,6 +682,8 @@ export async function main() {
       showBoard = true;
     } else if (arg === "--telegram") {
       telegramSetup = true;
+    } else if (arg === "--tmux") {
+      useTmux = true;
     } else if (!arg.startsWith("-") || arg === "-a") {
       remainingArgs.push(arg);
     }
@@ -695,6 +762,12 @@ export async function main() {
 
       // Acquire lock so other bart processes know we're running
       acquireLock(cwd);
+
+      if (useTmux) {
+        await runWithTmux(tasksPath, cwd, workstream, agentOverride, autoContinue, tasksFlag, planSlug);
+        releaseLock(cwd);
+        break;
+      }
 
       if (specificTask) {
         await runAgent(specificTask, tasksPath, agentOverride, autoContinue);
@@ -1393,6 +1466,89 @@ export async function main() {
       showHelp();
       break;
       
+    case "collab": {
+      const subcommand = remainingArgs[1];
+      if (subcommand === "start") {
+        const session = new CollabSession();
+        const code = await session.host();
+        console.log(`\nCollab session started.`);
+        console.log(`Join code: ${code}`);
+        console.log(`\nShare this code with teammates. They can join with:\n  bart collab join ${code}\n`);
+        console.log("Waiting for peers... (Ctrl+C to stop)\n");
+
+        session.on("peer-join", (peer) => {
+          console.log(`  + ${peer.gitName} joined`);
+        });
+        session.on("peer-leave", (peerId) => {
+          console.log(`  - peer ${peerId} left`);
+        });
+        session.on("error", (err: Error) => {
+          console.error("Collab error:", err.message);
+        });
+
+        process.on("SIGINT", () => {
+          session.close();
+          process.exit(0);
+        });
+
+        // Keep the process alive
+        await new Promise(() => {});
+      } else if (subcommand === "join") {
+        const code = remainingArgs[2]?.toUpperCase();
+        if (!code) {
+          console.error("Usage: bart collab join <code>");
+          process.exit(1);
+        }
+
+        const session = new CollabSession();
+        console.log(`\nLooking for collab session with code ${code}...`);
+        try {
+          await session.join(code);
+        } catch (err: unknown) {
+          console.error("Failed to join:", err instanceof Error ? err.message : String(err));
+          process.exit(1);
+        }
+
+        const peers = Array.from(session.state.peers.values()).filter(
+          (p) => p.id !== session.localPeer.id
+        );
+        console.log(`Connected! Session has ${peers.length + 1} peer(s):`);
+        for (const p of session.state.peers.values()) {
+          const label = p.id === session.localPeer.id ? " (you)" : "";
+          console.log(`  ${p.gitName}${label}`);
+        }
+        console.log("\n(Ctrl+C to disconnect)\n");
+
+        session.on("peer-join", (peer) => {
+          console.log(`  + ${peer.gitName} joined`);
+        });
+        session.on("peer-leave", (peerId) => {
+          console.log(`  - peer ${peerId} left`);
+        });
+        session.on("error", (err: Error) => {
+          console.error("Collab error:", err.message);
+        });
+
+        process.on("SIGINT", () => {
+          session.close();
+          process.exit(0);
+        });
+
+        // Launch local dashboard to show task progress alongside the session (REQ-03)
+        if (existsSync(tasksPath)) {
+          await runDashboard(tasksPath);
+          session.close();
+        } else {
+          await new Promise(() => {});
+        }
+      } else {
+        console.log("Usage:");
+        console.log("  bart collab start          Start a collab session and get a join code");
+        console.log("  bart collab join <code>    Join an existing collab session by code");
+      }
+      break;
+    }
+
     default:
       console.log(`Unknown command: ${command}`);
       showHelp();
