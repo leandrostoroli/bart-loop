@@ -1468,7 +1468,34 @@ export async function main() {
       
     case "collab": {
       const subcommand = remainingArgs[1];
+      const isForeground = remainingArgs.includes("--foreground");
+      const { spawnSync: tmuxSpawn } = require("child_process");
+      const bartBin = process.argv[1];
+      const collabSessionName = "bart";
+      const collabWindowName = "collab";
+
+      function spawnCollabInTmux(cmd: string): void {
+        const sessionCheck = tmuxSpawn("tmux", ["has-session", "-t", collabSessionName], { stdio: "ignore" });
+        const sessionExists = sessionCheck.status === 0;
+        if (sessionExists) {
+          tmuxSpawn("tmux", ["new-window", "-t", collabSessionName, "-n", collabWindowName, cmd], { stdio: "ignore" });
+        } else {
+          tmuxSpawn("tmux", ["new-session", "-d", "-s", collabSessionName, "-n", collabWindowName, cmd], { stdio: "ignore" });
+        }
+        console.log(`\nAttaching to tmux session '${collabSessionName}' (Ctrl+B, D to detach)\n`);
+        if (process.env.TMUX) {
+          tmuxSpawn("tmux", ["switch-client", "-t", `${collabSessionName}:${collabWindowName}`], { stdio: "inherit" });
+        } else {
+          tmuxSpawn("tmux", ["attach-session", "-t", `${collabSessionName}:${collabWindowName}`], { stdio: "inherit" });
+        }
+      }
+
       if (subcommand === "start") {
+        if (!isForeground) {
+          spawnCollabInTmux(`${bartBin} collab start --foreground`);
+          break;
+        }
+
         const session = new CollabSession();
         const code = await session.host();
         console.log(`\nCollab session started.`);
@@ -1498,6 +1525,11 @@ export async function main() {
         if (!code) {
           console.error("Usage: bart collab join <code>");
           process.exit(1);
+        }
+
+        if (!isForeground) {
+          spawnCollabInTmux(`${bartBin} collab join ${code} --foreground`);
+          break;
         }
 
         const session = new CollabSession();
