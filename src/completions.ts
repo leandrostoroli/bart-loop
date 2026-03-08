@@ -98,16 +98,11 @@ _bart() {
           _describe -t subcommands 'completions subcommand' subcommands
           ;;
         specialists)
-          local -a spec_subcommands
-          spec_subcommands=(
-            'new:Create a new specialist profile (guided)'
-            'git:Discover standards from git history & PR reviews'
-          )
           _arguments \\
             \$global_flags[@] \\
             '--history[Show specialist performance from execution history]' \\
             '--board[Show specialist board grouped by effectiveness]' \\
-            '1:subcommand:_describe -t spec_subcommands "specialists subcommand" spec_subcommands'
+            '1:subcommand:_bart_specialists_subcmds'
           ;;
         requirements|reqs)
           _arguments \\
@@ -202,6 +197,15 @@ _bart_task_ids() {
       _describe -t task_ids 'task id' task_ids
     fi
   fi
+}
+
+_bart_specialists_subcmds() {
+  local -a subcmds
+  subcmds=(
+    'new:Create a new specialist profile (guided)'
+    'git:Discover standards from git history & PR reviews'
+  )
+  _describe -t subcmds 'specialists subcommand' subcmds
 }
 
 _bart "\$@"
