@@ -16,6 +16,10 @@
 
 ---
 
+<p align="center">
+  <img src="assets/header-why-bart.png" alt="Why Bart?" width="600">
+</p>
+
 ## Why Bart?
 
 You're using Claude Code or OpenCode to build. That's great — but running commands manually for each task is slow.
@@ -37,6 +41,10 @@ No more:
 
 ---
 
+<p align="center">
+  <img src="assets/header-install.png" alt="Install" width="600">
+</p>
+
 ## Install
 
 ```bash
@@ -54,6 +62,10 @@ bart install
 ```
 
 ---
+
+<p align="center">
+  <img src="assets/header-quick-start.png" alt="Quick Start" width="600">
+</p>
 
 ## Quick Start
 
@@ -77,6 +89,10 @@ bart plan --latest
 ```
 
 ---
+
+<p align="center">
+  <img src="assets/header-how-it-works.png" alt="How It Works" width="600">
+</p>
 
 ## How It Works
 
@@ -109,6 +125,10 @@ bart run --workstream B
 ```
 
 ---
+
+<p align="center">
+  <img src="assets/header-commands.png" alt="Commands" width="600">
+</p>
 
 ## Commands
 
@@ -164,6 +184,10 @@ Resolution order:
 
 ---
 
+<p align="center">
+  <img src="assets/header-configuration.png" alt="Configuration" width="600">
+</p>
+
 ## Configuration
 
 ```bash
@@ -199,6 +223,10 @@ Bart sends notifications for:
 
 ---
 
+<p align="center">
+  <img src="assets/header-shell-completions.png" alt="Shell Completions" width="600">
+</p>
+
 ## Shell Completions
 
 Bart supports tab-completion for zsh and bash, including dynamic completion for plan names, workstreams, and task IDs.
@@ -215,6 +243,10 @@ bart completions bash > bart.bash
 Completions are also installed automatically when you run `bart install`.
 
 ---
+
+<p align="center">
+  <img src="assets/header-thinking.png" alt="Thinking Before Planning" width="600">
+</p>
 
 ## Thinking Before Planning
 
@@ -235,6 +267,10 @@ The session walks you through:
 When you're done, exit the session. Bart automatically detects the new plan and converts it to tasks — no extra steps needed.
 
 ---
+
+<p align="center">
+  <img src="assets/header-workstreams.png" alt="Workstreams" width="600">
+</p>
 
 ## Workstreams
 
@@ -263,6 +299,10 @@ Bart waits automatically and notifies when blocked.
 
 ---
 
+<p align="center">
+  <img src="assets/header-project-structure.png" alt="Project Structure" width="600">
+</p>
+
 ## Project Structure
 
 ```
@@ -277,6 +317,10 @@ your-project/
 ```
 
 ---
+
+<p align="center">
+  <img src="assets/header-specialists.png" alt="Specialists" width="600">
+</p>
 
 ## Specialists
 
@@ -308,6 +352,10 @@ Bart injects the matched specialist's profile context into agent prompts during 
 
 ---
 
+<p align="center">
+  <img src="assets/header-skip-permissions.png" alt="Skip Permissions" width="600">
+</p>
+
 ## Recommended: Skip Permissions
 
 Bart is designed for frictionless automation. Run with:
@@ -322,6 +370,10 @@ bart config --agent claude
 ```
 
 ---
+
+<p align="center">
+  <img src="assets/header-troubleshooting.png" alt="Troubleshooting" width="600">
+</p>
 
 ## Troubleshooting
 
@@ -338,6 +390,10 @@ bart config --agent claude
 - Resume anytime with `bart run` — it picks up where you left off
 
 ---
+
+<p align="center">
+  <img src="assets/header-license.png" alt="License" width="600">
+</p>
 
 ## License
 
