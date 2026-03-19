@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
-import { Task, Requirement } from "./constants.js";
+import { Task, Requirement, TestingMetadata } from "./constants.js";
 import { findFile } from "./tasks.js";
 import { discoverSpecialists, matchSpecialist, loadSpecialistModel } from "./specialists.js";
 
@@ -85,13 +85,48 @@ function parseExplicitRequirements(lines: string[]): Requirement[] | null {
   return requirements.length > 0 ? requirements : null;
 }
 
+function parseTestingMetadata(lines: string[]): TestingMetadata | null {
+  let inTestingSection = false;
+  const metadata: TestingMetadata = {};
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.match(/^##\s+Testing\s*$/i)) {
+      inTestingSection = true;
+      continue;
+    }
+    if (inTestingSection && trimmed.startsWith("## ")) {
+      break;
+    }
+    if (inTestingSection) {
+      const commandMatch = trimmed.match(/^Test\s+command:\s*(.+)$/i);
+      if (commandMatch) {
+        metadata.test_command = commandMatch[1].trim();
+        continue;
+      }
+      const frameworkMatch = trimmed.match(/^Framework:\s*(.+)$/i);
+      if (frameworkMatch) {
+        metadata.framework = frameworkMatch[1].trim();
+        continue;
+      }
+      const conventionsMatch = trimmed.match(/^Conventions:\s*(.+)$/i);
+      if (conventionsMatch) {
+        metadata.conventions = conventionsMatch[1].trim();
+        continue;
+      }
+    }
+  }
+
+  return Object.keys(metadata).length > 0 ? metadata : null;
+}
+
 function extractReqReferences(text: string): string[] {
   const matches = text.match(/\[REQ-\w+\]/g);
   if (!matches) return [];
   return matches.map(m => m.slice(1, -1));
 }
 
-export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Task[]; requirements: Requirement[] } {
+export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Task[]; requirements: Requirement[]; testing: TestingMetadata | null } {
   const lines = planContent.split("\n");
   const tasks: Task[] = [];
   const workstreams = ["A", "B", "C", "D", "E", "F"];
@@ -116,6 +151,9 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
   const explicitReqs = parseExplicitRequirements(lines);
   const isExplicitMode = explicitReqs !== null;
 
+  // Check for testing metadata section
+  const testing = parseTestingMetadata(lines);
+
   // Track current ## section for auto-extract mode
   let currentSectionName = "";
   const autoReqMap = new Map<string, Requirement>(); // sectionName -> Requirement
@@ -128,9 +166,9 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
     const trimmed = line.trim();
 
     if (trimmed.startsWith("## ") && !trimmed.startsWith("### ")) {
-      // Skip the Requirements section itself in auto-extract mode
+      // Skip metadata sections (Requirements, Testing) — not workstream content
       const sectionTitle = extractTitle(trimmed);
-      if (!sectionTitle.match(/^Requirements$/i)) {
+      if (!sectionTitle.match(/^(Requirements|Testing)$/i)) {
         currentSectionName = sectionTitle;
 
         if (!isExplicitMode && currentSectionName) {
@@ -257,7 +295,7 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
     }
   }
 
-  return { tasks, requirements };
+  return { tasks, requirements, testing };
 }
 
 export async function runPlanCommand(cwd: string, _tasksPath: string, planPathArg?: string, useLatestPlan?: boolean, autoConfirm?: boolean) {
@@ -339,7 +377,7 @@ Example plan.md:
   console.log(`\n📋 Found plan: ${planPath}\n`);
   
   const planContent = readFileSync(planPath, "utf-8");
-  const { tasks, requirements } = parsePlanToTasks(planContent, cwd);
+  const { tasks, requirements, testing } = parsePlanToTasks(planContent, cwd);
 
   // Auto-assign specialists to tasks (uses ML model when available [REQ-02])
   const specialists = discoverSpecialists(cwd);
@@ -380,6 +418,7 @@ Example plan.md:
     plan_file: `.bart/plans/${planDirName}/plan.md`,
     project_root: cwd,
     requirements: requirements.length > 0 ? requirements : undefined,
+    testing: testing || undefined,
     tasks
   };
 

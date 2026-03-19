@@ -81,6 +81,7 @@ Read the source plan and extract:
 - **File references** — Any files, paths, or directories mentioned (these become `Files:` lines)
 - **Dependencies** — Any ordering or sequencing implied between work items
 - **Technical context** — Stack, constraints, patterns mentioned
+- **Testing context** — Test commands, test frameworks, existing test patterns, test file locations, and any validation/verification criteria mentioned in the source plan. Look for references to test runners (jest, vitest, pytest, go test), test directories, CI config with test steps, and any `package.json` test scripts.
 
 Do not discard information. Every meaningful work item in the source plan should map to a task in the output.
 
@@ -159,6 +160,7 @@ Extract requirements from the source plan's goals, objectives, and context. Each
 - Map high-level goals to `[REQ-XX]` identifiers
 - Keep requirements atomic — one testable thing per requirement
 - Ensure every work item from the source plan is covered by at least one requirement
+- When the source plan mentions testing, validation, or verification criteria, capture those as explicit requirements (e.g., "All API endpoints have integration tests", "Performance benchmarks verified under load")
 
 ## Step 5: Structure into Bart Format
 
@@ -174,19 +176,78 @@ The plan MUST follow this exact structure. The `bart plan` parser uses `##` head
 - [REQ-02] Second requirement description
 - [REQ-03] Third requirement description
 
+## Testing
+Test command: npm test
+Framework: vitest
+Conventions: tests live in __tests__/ directories, named *.test.ts
+
 ## Section Name (becomes Workstream A)
 ### Task title [REQ-01]
 Description of what to do.
-Files: path/to/file.ts, path/to/other.ts
+
+**Test first:**
+- Create `tests/path/to/test.ts`
+- Test: [description of what the test verifies]
+```typescript
+// Complete test code here
+```
+- Run: `npm test -- tests/path/to/test.ts`
+- Expected: FAIL (function not defined / behavior not implemented)
+
+**Implementation:**
+- Modify `path/to/file.ts`
+- [Description of implementation steps]
+
+**Verify:**
+- Run: `npm test -- tests/path/to/test.ts`
+- Expected: PASS
+
+Files: path/to/file.ts, tests/path/to/test.ts
 
 ### [specialist-name] Another task title [REQ-02]
 Description with specialist tag for routing.
-Files: src/components/Thing.tsx
+
+**Test first:**
+- Create `tests/components/Thing.test.tsx`
+- Test: [description of what the test verifies]
+```typescript
+// Complete test code here
+```
+- Run: `npm test -- tests/components/Thing.test.tsx`
+- Expected: FAIL
+
+**Implementation:**
+- Modify `src/components/Thing.tsx`
+- [Description of implementation steps]
+
+**Verify:**
+- Run: `npm test -- tests/components/Thing.test.tsx`
+- Expected: PASS
+
+Files: src/components/Thing.tsx, tests/components/Thing.test.tsx
 
 ## Another Section (becomes Workstream B after every 2 sections)
 ### Task in next workstream [REQ-03]
 Description of the task.
-Files: src/api/endpoint.ts
+
+**Test first:**
+- Create `tests/api/endpoint.test.ts`
+- Test: [description of what the test verifies]
+```typescript
+// Complete test code here
+```
+- Run: `npm test -- tests/api/endpoint.test.ts`
+- Expected: FAIL
+
+**Implementation:**
+- Modify `src/api/endpoint.ts`
+- [Description of implementation steps]
+
+**Verify:**
+- Run: `npm test -- tests/api/endpoint.test.ts`
+- Expected: PASS
+
+Files: src/api/endpoint.ts, tests/api/endpoint.test.ts
 ```
 
 ### Parser Rules (how `bart plan` interprets this)
@@ -195,17 +256,19 @@ These rules are baked into the parser — your plan must conform to them:
 
 1. **`## Requirements` section** — Parsed as explicit requirements. Each line must match: `- [REQ-XX] description`. If this section exists, tasks must reference requirements with `[REQ-XX]` markers. If omitted, requirements are auto-generated from `##` section headings (lower fidelity).
 
-2. **`##` headings** — Define workstream boundaries. The first `##` section becomes workstream A, and the workstream letter increments every 2 sections (sections 1-2 → A, sections 3-4 → B, etc.). The `## Requirements` section is skipped.
+2. **`## Testing` section** — Parsed as testing metadata (skipped for workstream calculation, injected into task context). Contains free-text fields: `Test command:` (how to run tests), `Framework:` (test framework in use), `Conventions:` (where tests live, naming patterns). This section appears between `## Requirements` and the first workstream section.
 
-3. **`###` headings** — Each becomes an individual task. The task ID is `{workstream}{number}` (e.g., A1, A2, B1).
+3. **`##` headings** — Define workstream boundaries. The first `##` section becomes workstream A, and the workstream letter increments every 2 sections (sections 1-2 → A, sections 3-4 → B, etc.). The `## Requirements` and `## Testing` sections are skipped.
 
-4. **`[specialist-name]` in `###` headings** — Tags a task for a specific specialist. Must match a discovered specialist name.
+4. **`###` headings** — Each becomes an individual task. The task ID is `{workstream}{number}` (e.g., A1, A2, B1).
 
-5. **`[REQ-XX]` in `###` headings or nearby lines** — Links the task to that requirement for coverage tracking.
+5. **`[specialist-name]` in `###` headings** — Tags a task for a specific specialist. Must match a discovered specialist name.
 
-6. **File references** — The parser extracts file paths (pattern: `word/word.ext`) from the 10 lines after each `###` heading. List target files explicitly.
+6. **`[REQ-XX]` in `###` headings or nearby lines** — Links the task to that requirement for coverage tracking.
 
-7. **Dependencies** — The parser detects dependency keywords ("depends", "after", "requir") in task titles to create dependency links to the previous task in the same section.
+7. **File references** — The parser extracts file paths (pattern: `word/word.ext`) from the 10 lines after each `###` heading. List target files explicitly.
+
+8. **Dependencies** — The parser detects dependency keywords ("depends", "after", "requir") in task titles to create dependency links to the previous task in the same section.
 
 ### Workstream Separation Rules
 
@@ -236,6 +299,9 @@ Before outputting the plan, verify:
 - [ ] Each section has 3-5 tasks (split or merge if needed)
 - [ ] File paths are realistic and specific (not generic placeholders)
 - [ ] Every work item from the source plan is represented in the output
+- [ ] Every task has associated test files in its `Files:` line (both source and test files listed)
+- [ ] Every task includes **Test first**, **Implementation**, and **Verify** blocks with complete test code
+- [ ] A `## Testing` section exists with test command, framework, and conventions
 
 ## Step 7: Write and Review
 
@@ -295,26 +361,163 @@ Users report 5-8 second load times. Target is under 2 seconds.
 - [REQ-03] Client-side caching prevents redundant fetches
 - [REQ-04] Chart component does not re-render unnecessarily
 
+## Testing
+Test command: npm test
+Framework: vitest
+Conventions: tests in __tests__/ directories, named *.test.ts
+
 ## API & Caching
 ### Parallelize API calls in Overview [REQ-01] [REQ-02]
 Refactor the 6 sequential API calls in Overview to use Promise.all for parallel fetching.
-Files: src/pages/Overview.tsx
+
+**Test first:**
+- Create `__tests__/pages/Overview.test.tsx`
+- Test: API calls are made in parallel, not sequentially
+```typescript
+import { render, waitFor } from '@testing-library/react';
+import { Overview } from '../src/pages/Overview';
+
+test('fetches all API data in parallel', async () => {
+  const fetchSpy = vi.spyOn(global, 'fetch');
+  render(<Overview />);
+  await waitFor(() => {
+    expect(fetchSpy).toHaveBeenCalledTimes(6);
+    // All calls should start before any resolve
+    const callTimes = fetchSpy.mock.invocationCallOrder;
+    expect(Math.max(...callTimes) - Math.min(...callTimes)).toBeLessThan(2);
+  });
+});
+```
+- Run: `npm test -- __tests__/pages/Overview.test.tsx`
+- Expected: FAIL (calls are still sequential)
+
+**Implementation:**
+- Modify `src/pages/Overview.tsx`
+- Replace sequential await calls with Promise.all
+
+**Verify:**
+- Run: `npm test -- __tests__/pages/Overview.test.tsx`
+- Expected: PASS
+
+Files: src/pages/Overview.tsx, __tests__/pages/Overview.test.tsx
 
 ### Add React Query provider for data caching [REQ-03]
 Set up React Query with appropriate stale times to cache dashboard data across navigations.
-Files: src/providers/QueryProvider.tsx, src/main.tsx
+
+**Test first:**
+- Create `__tests__/providers/QueryProvider.test.tsx`
+- Test: data is cached and not re-fetched on navigation
+```typescript
+import { renderHook } from '@testing-library/react';
+import { QueryProvider } from '../src/providers/QueryProvider';
+
+test('caches dashboard data across navigations', async () => {
+  const fetchSpy = vi.spyOn(global, 'fetch');
+  const { rerender } = renderHook(() => useDashboardData(), {
+    wrapper: QueryProvider,
+  });
+  rerender();
+  expect(fetchSpy).toHaveBeenCalledTimes(1); // not refetched
+});
+```
+- Run: `npm test -- __tests__/providers/QueryProvider.test.tsx`
+- Expected: FAIL (no caching exists yet)
+
+**Implementation:**
+- Modify `src/providers/QueryProvider.tsx` and `src/main.tsx`
+- Add React Query provider with stale time configuration
+
+**Verify:**
+- Run: `npm test -- __tests__/providers/QueryProvider.test.tsx`
+- Expected: PASS
+
+Files: src/providers/QueryProvider.tsx, src/main.tsx, __tests__/providers/QueryProvider.test.tsx
 
 ## Rendering & UX
 ### [frontend] Memoize chart component [REQ-04]
 Wrap chart with React.memo and use useMemo for computed data to prevent unnecessary re-renders.
-Files: src/components/MetricsChart.tsx
+
+**Test first:**
+- Create `__tests__/components/MetricsChart.test.tsx`
+- Test: chart does not re-render when parent state changes unrelated to chart data
+```typescript
+import { render } from '@testing-library/react';
+import { MetricsChart } from '../src/components/MetricsChart';
+
+test('does not re-render on unrelated state changes', () => {
+  const renderSpy = vi.fn();
+  const { rerender } = render(
+    <MetricsChart data={mockData} onRender={renderSpy} />
+  );
+  rerender(<MetricsChart data={mockData} onRender={renderSpy} />);
+  expect(renderSpy).toHaveBeenCalledTimes(1);
+});
+```
+- Run: `npm test -- __tests__/components/MetricsChart.test.tsx`
+- Expected: FAIL (component re-renders every time)
+
+**Implementation:**
+- Modify `src/components/MetricsChart.tsx`
+- Wrap with React.memo and useMemo for computed data
+
+**Verify:**
+- Run: `npm test -- __tests__/components/MetricsChart.test.tsx`
+- Expected: PASS
+
+Files: src/components/MetricsChart.tsx, __tests__/components/MetricsChart.test.tsx
 
 ### [frontend] Add loading skeletons [REQ-01]
 Add skeleton placeholders for dashboard panels to improve perceived performance during data fetch.
-Files: src/pages/Overview.tsx, src/components/Skeleton.tsx
+
+**Test first:**
+- Create `__tests__/components/Skeleton.test.tsx`
+- Test: skeleton is shown while data is loading
+```typescript
+import { render, screen } from '@testing-library/react';
+import { Overview } from '../src/pages/Overview';
+
+test('shows skeleton placeholders while loading', () => {
+  render(<Overview />);
+  expect(screen.getAllByTestId('skeleton-placeholder')).toHaveLength(4);
+});
+```
+- Run: `npm test -- __tests__/components/Skeleton.test.tsx`
+- Expected: FAIL (no skeleton component exists)
+
+**Implementation:**
+- Create `src/components/Skeleton.tsx`
+- Modify `src/pages/Overview.tsx` to show skeletons during loading
+
+**Verify:**
+- Run: `npm test -- __tests__/components/Skeleton.test.tsx`
+- Expected: PASS
+
+Files: src/pages/Overview.tsx, src/components/Skeleton.tsx, __tests__/components/Skeleton.test.tsx
 
 ## Verification
 ### Run Lighthouse performance audit [REQ-01]
 Verify Lighthouse performance score exceeds 90 and load time is under 2 seconds on throttled 3G.
-Files: tests/performance.test.ts
+
+**Test first:**
+- Create `__tests__/performance/lighthouse.test.ts`
+- Test: Lighthouse score meets performance threshold
+```typescript
+import { runLighthouse } from '../test-utils/lighthouse';
+
+test('dashboard Lighthouse performance score > 90', async () => {
+  const result = await runLighthouse('http://localhost:3000/dashboard');
+  expect(result.performance).toBeGreaterThan(90);
+});
+```
+- Run: `npm test -- __tests__/performance/lighthouse.test.ts`
+- Expected: FAIL (performance not yet optimized)
+
+**Implementation:**
+- No new code — this task verifies the cumulative effect of all previous tasks
+
+**Verify:**
+- Run: `npm test -- __tests__/performance/lighthouse.test.ts`
+- Expected: PASS
+
+Files: __tests__/performance/lighthouse.test.ts
 ```

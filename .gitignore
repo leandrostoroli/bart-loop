@@ -5,3 +5,4 @@ dist/
 .env
 .env.*
 .bart/
+.nano-banana-config.json

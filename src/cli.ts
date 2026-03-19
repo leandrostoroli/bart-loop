@@ -612,6 +612,72 @@ function identifyAffectedTasks(wsTasks: import("./constants.js").Task[], issues:
   return wsTasks.filter(t => matched.has(t.id));
 }
 
+/**
+ * Build the testing context block from plan-level ## Testing metadata.
+ * When metadata is available, includes test command, framework, and conventions.
+ * When absent, instructs the specialist to discover the test setup.
+ */
+export function buildTestingContextBlock(testingMeta: import("./constants.js").TestingMetadata | null | undefined): string {
+  if (testingMeta) {
+    const parts: string[] = [];
+    if (testingMeta.test_command) parts.push(`Test command: \`${testingMeta.test_command}\``);
+    if (testingMeta.framework) parts.push(`Framework: ${testingMeta.framework}`);
+    if (testingMeta.conventions) parts.push(`Conventions: ${testingMeta.conventions}`);
+    return `\n${parts.join("\n")}`;
+  }
+  return `\nNo test command specified in the plan. Discover the project's test setup by examining package.json, existing test files, CI config, or test configuration files, then use the appropriate test command.`;
+}
+
+/**
+ * Build the self-review block appended to every task prompt.
+ * Includes scope check, code quality check, TDD protocol, and evidence requirement.
+ */
+export function buildSelfReviewBlock(options: {
+  specialistPremises?: string;
+  specialistTestExpectations?: string[];
+  testingContextBlock: string;
+}): string {
+  const { specialistPremises, specialistTestExpectations, testingContextBlock } = options;
+  const defaultQualityGate = DEFAULT_QUALITY_GATE.map(s => `\n- ${s}`).join("");
+
+  return `
+
+## Mandatory Self-Review Gate
+
+Before marking this task as done, you MUST perform a self-review. Do NOT consider the task complete until all checks pass.
+
+### 1. Scope Check
+- Re-read the task description above
+- Verify you implemented exactly what was described — nothing more, nothing less
+- If you added anything beyond the task scope, revert it
+
+### 2. Code Quality Check
+- Review all changes for correctness, readability, and maintainability${specialistPremises ? `
+- Apply the specialist's standards as the quality bar:
+${specialistPremises.split("\n").map(line => `  ${line}`).join("\n")}` : `
+- Apply these default quality standards:${defaultQualityGate}`}
+
+### 3. TDD Protocol (Mandatory)
+
+You MUST follow this sequence for every change:
+1. WRITE the failing test first — test file and test code before any production code
+2. RUN the test and verify it FAILS for the expected reason
+3. WRITE the minimal implementation to make the test pass
+4. RUN the test and verify it PASSES
+5. COMMIT the test and implementation together
+${specialistTestExpectations && specialistTestExpectations.length > 0
+? `\nSpecialist test expectations:${specialistTestExpectations.map(e => `\n- ${e}`).join("")}`
+: ""}
+${testingContextBlock}
+### Evidence Requirement
+Before marking this task complete, you MUST:
+- Show actual test command output (not assumptions)
+- All tests must pass with zero failures
+- If you cannot run tests, explain why and flag for review
+
+Only after all three checks pass should you consider this task complete.`;
+}
+
 export async function runAgent(taskId: string, tasksPath: string, agentOverride?: string, autoContinue?: boolean, firedMilestones?: Set<number>) {
   const tasks = readTasks(tasksPath);
   const task = getTaskById(tasks, taskId);
@@ -680,33 +746,13 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
     }
   }
 
-  const defaultQualityGate = DEFAULT_QUALITY_GATE.map(s => `\n- ${s}`).join("");
-
-  const selfReviewBlock = `
-
-## Mandatory Self-Review Gate
-
-Before marking this task as done, you MUST perform a self-review. Do NOT consider the task complete until all checks pass.
-
-### 1. Scope Check
-- Re-read the task description above
-- Verify you implemented exactly what was described — nothing more, nothing less
-- If you added anything beyond the task scope, revert it
-
-### 2. Code Quality Check
-- Review all changes for correctness, readability, and maintainability${specialistPremises ? `
-- Apply the specialist's standards as the quality bar:
-${specialistPremises.split("\n").map(line => `  ${line}`).join("\n")}` : `
-- Apply these default quality standards:${defaultQualityGate}`}
-
-### 3. Test Coverage Check${specialistTestExpectations && specialistTestExpectations.length > 0
-? specialistTestExpectations.map(e => `\n- ${e}`).join("")
-: `
-- Ensure tests exist for all changes`}
-- Run the tests and confirm they pass
-- If tests are missing, write them before completing
-
-Only after all three checks pass should you consider this task complete.`;
+  // Build testing context and self-review blocks
+  const testingContextBlock = buildTestingContextBlock(tasksData.testing);
+  const selfReviewBlock = buildSelfReviewBlock({
+    specialistPremises,
+    specialistTestExpectations,
+    testingContextBlock,
+  });
 
   const taskPrompt = `Task: ${task.title}
 Description: ${task.description}
@@ -1414,13 +1460,22 @@ export async function main() {
       // Find package root (where skills/ directory lives)
       const packageRoot = dirname(dirname(new URL(import.meta.url).pathname));
 
-      const skills = [
-        { src: join(packageRoot, "skills", "bart-plan", "SKILL.md"), dir: join(claudeSkillsDir, "bart-plan"), name: "bart-plan" },
-        { src: join(packageRoot, "skills", "bart-think", "SKILL.md"), dir: join(claudeSkillsDir, "bart-think"), name: "bart-think" },
-        { src: join(packageRoot, "skills", "bart-new-specialist", "SKILL.md"), dir: join(claudeSkillsDir, "bart-new-specialist"), name: "bart-new-specialist" },
-        { src: join(packageRoot, "skills", "bart-specialists-git", "SKILL.md"), dir: join(claudeSkillsDir, "bart-specialists-git"), name: "bart-specialists-git" },
+      // Auto-discover skills: root SKILL.md + all subdirectories under skills/
+      const skills: { src: string; dir: string; name: string }[] = [
         { src: join(packageRoot, "SKILL.md"), dir: join(claudeSkillsDir, "bart-loop"), name: "bart-loop" },
       ];
+      const skillsSrcDir = join(packageRoot, "skills");
+      if (existsSync(skillsSrcDir)) {
+        for (const entry of readdirSync(skillsSrcDir, { withFileTypes: true })) {
+          if (entry.isDirectory() && existsSync(join(skillsSrcDir, entry.name, "SKILL.md"))) {
+            skills.push({
+              src: join(skillsSrcDir, entry.name, "SKILL.md"),
+              dir: join(claudeSkillsDir, entry.name),
+              name: entry.name,
+            });
+          }
+        }
+      }
 
       let installed = 0;
       for (const skill of skills) {

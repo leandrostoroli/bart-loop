@@ -6,7 +6,7 @@
  * Mirrors what `bart install` does so `npm i -g bart-loop` is a single-step setup.
  */
 
-import { existsSync, mkdirSync, copyFileSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
@@ -19,14 +19,16 @@ const home = homedir();
 
 const skillsDir = join(home, ".claude", "skills");
 
-// All skills — keep in sync with the install case in src/cli.ts
-const skills = [
-  ["SKILL.md", "bart-loop"],
-  [join("skills", "bart-plan", "SKILL.md"), "bart-plan"],
-  [join("skills", "bart-think", "SKILL.md"), "bart-think"],
-  [join("skills", "bart-new-specialist", "SKILL.md"), "bart-new-specialist"],
-  [join("skills", "bart-specialists-git", "SKILL.md"), "bart-specialists-git"],
-];
+// Auto-discover skills: root SKILL.md + all subdirectories under skills/
+const skills = [["SKILL.md", "bart-loop"]];
+const skillsSrcDir = join(projectRoot, "skills");
+if (existsSync(skillsSrcDir)) {
+  for (const entry of readdirSync(skillsSrcDir, { withFileTypes: true })) {
+    if (entry.isDirectory() && existsSync(join(skillsSrcDir, entry.name, "SKILL.md"))) {
+      skills.push([join("skills", entry.name, "SKILL.md"), entry.name]);
+    }
+  }
+}
 
 // --- Skills Installation ---
 

@@ -35,12 +35,22 @@ agents:
   - agent-name-1
 standards:
   - standard-name-1
+test_expectations:
+  - Key verification item derived from testing conversation
+  - Another domain-specific testing expectation
 ---
 
 ## Premises
 
 Guidelines, rules, and standards this specialist follows when executing tasks.
 Written in imperative voice. These are injected into the task prompt.
+
+### Testing Protocol
+- Write tests before production code — follow RED-GREEN-REFACTOR
+- Run the test and verify it fails for the expected reason before implementing
+- Write minimal implementation to make the test pass
+- Show actual test output as evidence before marking task complete
+- [Domain-specific testing rules]
 
 ## Learnings
 
@@ -54,7 +64,8 @@ Written in imperative voice. These are injected into the task prompt.
 - `skills`: Names of other specialists (type: skill) whose content gets resolved and injected
 - `agents`: Names of other specialists (type: agent) whose content gets resolved and injected
 - `standards`: Names of other specialists (type: standard) referenced for context
-- `## Premises`: The body of specialist knowledge — guidelines, patterns, rules
+- `test_expectations`: Domain-specific testing verification items (injected into task self-review)
+- `## Premises`: The body of specialist knowledge — guidelines, patterns, rules. Includes a `### Testing Protocol` subsection with TDD rules and domain-specific testing guidance
 - `## Learnings`: Empty on creation; bart auto-appends entries after task completion
 
 ## Workflow
@@ -163,6 +174,7 @@ For a **design engineering** specialist, ask about:
 For any specialist, always ask:
 - "What are the top 3-5 rules this specialist must always follow?"
 - "What's a common mistake in this domain that the specialist should explicitly avoid?"
+- "What are the most common testing mistakes in this domain that the specialist should avoid?"
 
 After gathering answers, draft the premises section and present it:
 
@@ -181,6 +193,44 @@ Iterate until the user is satisfied. Premises should be:
 - Specific to the domain (not generic advice like "write clean code")
 - Actionable by an AI agent (not aspirational goals)
 - Concise — aim for 10-30 lines
+
+### Phase 4b: Testing Knowledge
+
+Every specialist must include testing knowledge. This phase ensures domain-specific testing rules are captured alongside the common TDD protocol.
+
+Ask domain-specific testing questions based on the specialist's role:
+
+- "What types of tests are most relevant for [role]? (unit, integration, e2e, contract, etc.)"
+- "What testing frameworks or tools does [role] typically use?"
+- "What are the most common testing mistakes in [domain]?"
+
+Based on answers, draft a `### Testing Protocol` subsection to include within the premises. It always starts with the common TDD protocol, then adds domain-specific rules:
+
+```
+Here's the testing protocol for [name]:
+
+### Testing Protocol
+- Write tests before production code — follow RED-GREEN-REFACTOR
+- Run the test and verify it fails for the expected reason before implementing
+- Write minimal implementation to make the test pass
+- Show actual test output as evidence before marking task complete
+- [Domain-specific rule 1 from conversation]
+- [Domain-specific rule 2 from conversation]
+
+Does this capture the right testing approach? Want to adjust anything?
+```
+
+Also derive 2-4 `test_expectations` entries for the YAML frontmatter — these are key verification items that bart injects into the task self-review gate:
+
+```
+Proposed test_expectations for the profile frontmatter:
+  - [Expectation 1, e.g. "All API endpoints have integration tests"]
+  - [Expectation 2, e.g. "Error paths are tested, not just happy paths"]
+
+These will be checked during task self-review. Look right?
+```
+
+Wait for confirmation before proceeding.
 
 ### Phase 5: Choose Placement
 
@@ -223,11 +273,17 @@ skills:
   - [skill-2]
 agents:
   - [agent-1]
+test_expectations:
+  - [Expectation from Phase 4b]
+  - [Expectation from Phase 4b]
 ---
 
 ## Premises
 
 [Premises text from Phase 4]
+
+### Testing Protocol
+[Testing protocol from Phase 4b — common TDD rules plus domain-specific rules]
 
 ## Learnings
 ```
@@ -284,3 +340,4 @@ To see matching: bart suggest "your task description"
 6. **Start empty learnings** — Never pre-populate the Learnings section; bart appends to it automatically after task completion
 7. **Test before done** — Always offer `bart suggest` verification so the user sees how the specialist will score
 8. **Respect existing ecosystem** — Check for duplicates and leverage existing skills/agents rather than reinventing
+9. **Every specialist tests** — Phase 4b is mandatory for all specialists. The Testing Protocol subsection and `test_expectations` frontmatter ensure TDD is enforced during task execution

@@ -66,6 +66,8 @@ For [gray area]:
 Which fits your situation better?
 ```
 
+**Testing gray area**: If the testing approach hasn't been discussed by the end of Phase 3, surface it as an additional gray area: "How should tests be structured for this project?" Offer concrete options based on what you can infer from the codebase (existing test framework, test locations, naming patterns). This ensures the `## Testing` section in the plan is grounded in user decisions, not guesswork.
+
 After each area, classify the decision:
 - **Locked**: User made a clear choice — this is a constraint
 - **Discretionary**: User said "you decide" or "whatever works" — Claude has freedom
@@ -100,7 +102,15 @@ If the user tries to expand scope significantly, push back: "That sounds like a 
 
 Once scope is confirmed, write a single plan file that combines decisions, requirements, and workstream tasks.
 
-**Before writing the plan**, discover available specialists:
+**Before writing the plan**, discover the project's test setup by examining `package.json`, existing test files, CI config, or any test configuration files. Use read-only tools (Read, Glob, Grep) to find:
+
+- **Test command** — look in `package.json` scripts (`test`, `test:unit`, etc.), `Makefile`, or CI config
+- **Test framework** — identify from dependencies (vitest, jest, pytest, go test, etc.)
+- **Conventions** — check where existing tests live, naming patterns (e.g., `*.test.ts`, `*_test.go`)
+
+Use this information to populate the `## Testing` section in the plan output.
+
+**Then**, discover available specialists:
 
 ```bash
 bart specialists --history 2>/dev/null || echo "No specialists found"
@@ -130,17 +140,58 @@ Write directly in bart format — this is the key advantage over bart-plan. No c
 - [REQ-01] [Requirement derived from locked decisions and scope]
 - [REQ-02] [Another requirement]
 
+## Testing
+Test command: [discovered from repo or discussed during thinking]
+Framework: [discovered or discussed]
+Conventions: [discovered from repo or discussed]
+
 ## [Section Name]
 ### [Task title] [REQ-XX]
 [Description based on decisions made during thinking]
-Files: [specific files]
+
+**Test first:**
+- Create `tests/path/to/test.ts`
+- Test: [description of what the test verifies]
+```typescript
+// Complete test code here
+```
+- Run: `[test command] -- tests/path/to/test.ts`
+- Expected: FAIL (function not defined / behavior not implemented)
+
+**Implementation:**
+- Modify `path/to/file.ts`
+- [Description of implementation steps]
+
+**Verify:**
+- Run: `[test command] -- tests/path/to/test.ts`
+- Expected: PASS
+
+Files: path/to/file.ts, tests/path/to/test.ts
 
 ### [specialist-name] [Task title] [REQ-XX]
 [Description with specialist tag if applicable]
-Files: [specific files]
+
+**Test first:**
+- Create `tests/path/to/other.test.ts`
+- Test: [description of what the test verifies]
+```typescript
+// Complete test code here
+```
+- Run: `[test command] -- tests/path/to/other.test.ts`
+- Expected: FAIL
+
+**Implementation:**
+- Modify `path/to/other-file.ts`
+- [Description of implementation steps]
+
+**Verify:**
+- Run: `[test command] -- tests/path/to/other.test.ts`
+- Expected: PASS
+
+Files: path/to/other-file.ts, tests/path/to/other.test.ts
 ```
 
-The `## Decisions` section must appear before `## Requirements`. The bart plan parser skips `## Decisions` (like it skips `## Requirements`) when calculating workstream boundaries — it is metadata, not a workstream.
+The `## Decisions` section must appear before `## Requirements`. The `## Testing` section must appear between `## Requirements` and the first workstream section. The bart plan parser skips `## Decisions`, `## Requirements`, and `## Testing` when calculating workstream boundaries — they are metadata, not workstreams.
 
 ### Phase 6: Auto-Invoke Review
 

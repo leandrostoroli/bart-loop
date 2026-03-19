@@ -49,12 +49,19 @@ export interface Specialist {
   test_expectations?: string[];  // Custom test coverage expectations (e.g., "unit tests for all public functions")
 }
 
+export interface TestingMetadata {
+  test_command?: string;
+  framework?: string;
+  conventions?: string;
+}
+
 export interface TasksData {
   project?: string;
   plan_file?: string;
   project_root?: string;
   requirements?: Requirement[];
   specialists?: Specialist[];
+  testing?: TestingMetadata;
   tasks: Task[];
 }
 
@@ -63,6 +70,9 @@ export const DEFAULT_QUALITY_GATE = [
   "Follow existing code style, naming conventions, and patterns in the files you modify",
   "Do not introduce new dependencies or abstractions unless the task requires it",
   "Keep changes minimal and focused — avoid unrelated refactors or cleanups",
+  "Write tests before production code — follow the RED-GREEN-REFACTOR cycle",
+  "Show actual test command output as evidence before claiming task completion",
+  "Tests must verify real behavior, not mock behavior",
 ];
 
 export const HISTORY_FILE = "history.jsonl";
