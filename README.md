@@ -1,4 +1,6 @@
-<img src="bart-loop.png" alt="Bart Loop" align="center" width="800">
+<p align="center">
+  <img src="banner.png" alt="Bart Loop" width="800">
+</p>
 
 # Bart Loop
 
@@ -140,6 +142,10 @@ bart run --workstream B
 | `bart install` | Install skills and shell completions |
 | `bart config` | Show configuration |
 | `bart config --telegram` | Setup Telegram notifications |
+
+<p align="center">
+  <img src="dashboard.png" alt="Bart Dashboard" width="700">
+</p>
 
 ### Plan Selection
 
