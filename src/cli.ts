@@ -1,15 +1,14 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync, statSync, chmodSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
 import { spawn, ChildProcess } from "child_process";
-import { BART, BART_DIR } from "./constants.js";
-import { readTasks, findNextTask, getCwd, getTaskById, resolvePlanTasksPath } from "./tasks.js";
+import { BART, BART_DIR, DEFAULT_QUALITY_GATE } from "./constants.js";
+import { readTasks, findNextTask, getCwd, getTaskById, resolvePlanTasksPath, countReviewRetriesForTask } from "./tasks.js";
 import { printStatus, printWorkstreamStatus, printRequirementsReport } from "./status.js";
 import { runDashboard } from "./dashboard.js";
 import { runPlanCommand } from "./plan.js";
-import { sendTelegram, sendTelegramTestMessage, formatTaskStarted, formatTaskCompleted, formatTaskError, formatCriticalError, formatWorkstreamCompleted, formatWorkstreamBlocked, formatMilestone } from "./notify.js";
-import { discoverSpecialists, printSpecialists, appendHistory, extractPlanSlug, countResetsForTask, countWorkstreamErrors, printSpecialistHistory, scoreSpecialists, loadHistory, recordPairing, loadSpecialistModel, printSpecialistBoard, generateSpecialistsSummary, appendProfileLearning, resolveProfileContext } from "./specialists.js";
+import { sendTelegram, sendTelegramTestMessage, formatTaskStarted, formatTaskCompleted, formatTaskError, formatCriticalError, formatWorkstreamCompleted, formatWorkstreamBlocked, formatMilestone, formatWorkstreamReview, formatReviewEscalation } from "./notify.js";
+import { discoverSpecialists, printSpecialists, appendHistory, extractPlanSlug, countResetsForTask, countWorkstreamErrors, countWorkstreamReviewFailures, printSpecialistHistory, scoreSpecialists, loadHistory, recordPairing, loadSpecialistModel, printSpecialistBoard, generateSpecialistsSummary, appendProfileLearning, resolveProfileContext } from "./specialists.js";
 import { generateZshCompletion, generateBashCompletion, installCompletions } from "./completions.js";
-import { CollabSession } from "./collab/session.js";
 
 const CONFIG_DIR = join(process.env.HOME || "", ".bart");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -101,6 +100,44 @@ function isAnotherBartRunning(cwd: string): boolean {
   }
 }
 
+// --- Mode state file ---
+const MODE_FILE = "mode";
+
+/**
+ * Write the current mode ("thinking" or "planning") to .bart/mode.
+ * Used by hooks to block execution tools during skill phases.
+ */
+export function setMode(cwd: string, mode: "thinking" | "planning"): void {
+  const bartDir = join(cwd, BART_DIR);
+  if (!existsSync(bartDir)) mkdirSync(bartDir, { recursive: true });
+  writeFileSync(join(bartDir, MODE_FILE), mode);
+}
+
+/**
+ * Read the current mode from .bart/mode, or null if not set.
+ */
+export function getMode(cwd: string): "thinking" | "planning" | null {
+  const modePath = join(cwd, BART_DIR, MODE_FILE);
+  try {
+    if (!existsSync(modePath)) return null;
+    const value = readFileSync(modePath, "utf-8").trim();
+    if (value === "thinking" || value === "planning") return value;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remove the .bart/mode file, re-enabling execution tools.
+ */
+export function clearMode(cwd: string): void {
+  const modePath = join(cwd, BART_DIR, MODE_FILE);
+  try {
+    if (existsSync(modePath)) unlinkSync(modePath);
+  } catch {}
+}
+
 function resetInProgressTask(tasksPath: string, taskId: string) {
   try {
     const tasksData = readTasks(tasksPath);
@@ -136,6 +173,7 @@ function installSignalHandlers(cwd: string) {
     }
 
     releaseLock(cwd);
+    clearMode(cwd);
 
     // Give child a moment to exit, then force exit
     setTimeout(() => process.exit(130), 3500).unref();
@@ -282,8 +320,6 @@ Usage:
   bart completions install  Auto-detect shell and install completions
   bart install           Install bart skills and shell completions
   bart init              Initialize bart in current project
-  bart collab start      Start a collab session; prints a 6-char join code
-  bart collab join <code>  Join a collab session by join code (mDNS discovery)
   bart config            Show current config
   bart config --agent <name>  Set default agent (claude, opencode)
   bart config --telegram         Setup Telegram notifications
@@ -297,7 +333,6 @@ Options:
   --agent <name>         Agent to use (claude, opencode)
   --auto-continue        Auto-continue to next task (default: true)
   --no-auto-continue     Ask before continuing to next task
-  --tmux                 Run each workstream in a separate tmux window
 
 Plan Resolution:
   Tasks are resolved in this order:
@@ -315,7 +350,6 @@ Examples:
   bart run A1                    # Run specific task
   bart run --agent claude        # Run with claude, auto-continue
   bart run --no-auto-continue    # Ask before each task
-  bart run --tmux                # Run workstreams in parallel tmux windows
   bart dashboard                 # Open TUI dashboard
   bart plan                      # Generate tasks from plan.md
   bart config --agent claude     # Set default agent to claude
@@ -323,6 +357,260 @@ Examples:
 }
 
 const MILESTONE_THRESHOLDS = [25, 50, 80, 100] as const;
+
+export interface WorkstreamReviewResult {
+  verdict: "PASS" | "FAIL";
+  issues: string[];
+  summary: string;
+}
+
+/**
+ * Spawn a dedicated Claude agent to review all completed tasks in a workstream.
+ * The reviewer validates requirements coverage, test coverage, and cross-task code quality.
+ * Returns a structured PASS/FAIL verdict with specific issues.
+ */
+export async function runWorkstreamReview(
+  workstreamId: string,
+  tasksPath: string,
+  agentOverride?: string,
+): Promise<WorkstreamReviewResult> {
+  const tasksData = readTasks(tasksPath);
+  const projectRoot = tasksData.project_root || process.cwd();
+  const wsTasks = tasksData.tasks.filter(t => t.workstream === workstreamId);
+
+  if (wsTasks.length === 0) {
+    return { verdict: "PASS", issues: [], summary: "No tasks in workstream." };
+  }
+
+  console.log(`\n🔍 Starting workstream review for: ${workstreamId}`);
+  console.log(`   Tasks to review: ${wsTasks.length}`);
+
+  // 1. Collect all task descriptions and requirements
+  const taskSummaries = wsTasks.map(t => {
+    const reqs = t.requirements && t.requirements.length > 0
+      ? `\n   Requirements: ${t.requirements.join(", ")}`
+      : "";
+    return `- [${t.id}] ${t.title}\n   Description: ${t.description}\n   Files: ${t.files.join(", ")}${reqs}`;
+  }).join("\n\n");
+
+  // 2. Collect all files modified across the workstream (deduplicated)
+  const allFilesModified = [...new Set(
+    wsTasks.flatMap(t => t.files_modified || [])
+  )].sort();
+  const allFilesDeclared = [...new Set(
+    wsTasks.flatMap(t => t.files || [])
+  )].sort();
+
+  // 3. Collect requirements that should be covered
+  const wsRequirementIds = [...new Set(
+    wsTasks.flatMap(t => t.requirements || [])
+  )];
+  let requirementsSection = "";
+  if (wsRequirementIds.length > 0 && tasksData.requirements) {
+    const wsReqs = tasksData.requirements.filter(r => wsRequirementIds.includes(r.id));
+    requirementsSection = `\n## Requirements to Validate\n\n${wsReqs.map(r =>
+      `- ${r.id}: ${r.description} (covered by: ${r.covered_by.join(", ")})`
+    ).join("\n")}`;
+  }
+
+  const filesModifiedSection = allFilesModified.length > 0
+    ? `\n## Files Modified Across Workstream\n\n${allFilesModified.map(f => `- ${f}`).join("\n")}`
+    : `\n## Files Declared in Tasks\n\n${allFilesDeclared.map(f => `- ${f}`).join("\n")}`;
+
+  const reviewPrompt = `You are a workstream reviewer for an automated task pipeline. Your job is to review ALL completed work in workstream "${workstreamId}" and produce a quality verdict.
+
+## Workstream Tasks
+
+${taskSummaries}
+${filesModifiedSection}
+${requirementsSection}
+
+## Review Instructions
+
+Perform the following checks:
+
+### 1. Requirements Coverage
+- For each requirement listed, verify that the code changes actually implement what was required
+- Flag any requirements that appear unmet or only partially addressed
+- If no explicit requirements exist, verify each task's description was fulfilled
+
+### 2. Test Coverage
+- Check that tests exist for the changes made across all tasks
+- Run the test suite and verify tests pass
+- Flag any modified files that lack corresponding test coverage
+
+### 3. Cross-Task Code Quality
+- Review interactions between changes from different tasks
+- Check for inconsistencies in naming, patterns, or approaches across tasks
+- Verify no duplicate code was introduced across task boundaries
+- Check for missing error handling at integration points between tasks
+
+## Output Format
+
+You MUST end your response with a verdict block in EXACTLY this format (on its own line):
+
+VERDICT: PASS
+
+or
+
+VERDICT: FAIL
+ISSUES:
+- [issue description]
+- [issue description]
+
+Use PASS only if all checks pass with no significant issues. Use FAIL if any requirement is unmet, tests are missing/failing, or there are cross-task quality problems.`;
+
+  // Resolve agent config
+  let agentConfig: { cmd: string; args: string[] };
+  if (agentOverride) {
+    agentConfig = agentOverride === "opencode"
+      ? { cmd: "opencode", args: ["run", "--dangerously-skip-permissions"] }
+      : { cmd: "claude", args: ["-p", "--dangerously-skip-permissions", "--output-format", "text"] };
+  } else {
+    agentConfig = await detectAgent();
+    if (agentConfig.cmd === "opencode") {
+      agentConfig.args = ["run", "--dangerously-skip-permissions"];
+    } else {
+      agentConfig.args = ["-p", "--dangerously-skip-permissions", "--output-format", "text"];
+    }
+  }
+
+  console.log(`   Agent: ${agentConfig.cmd}\n`);
+
+  const args = [...agentConfig.args, reviewPrompt];
+
+  // Capture output to parse verdict
+  let output = "";
+  const child = spawn(agentConfig.cmd, args, {
+    cwd: projectRoot,
+    stdio: ["inherit", "pipe", "inherit"],
+  });
+
+  child.stdout.on("data", (data: Buffer) => {
+    const text = data.toString();
+    output += text;
+    process.stdout.write(text);
+  });
+
+  const exitCode = await new Promise<number | null>((resolve) => {
+    child.on("close", (code) => resolve(code));
+    child.on("error", (err) => {
+      console.error(`\n❌ Failed to start review agent: ${err.message}`);
+      resolve(1);
+    });
+  });
+
+  if (exitCode !== 0) {
+    console.error(`\n⚠️ Review agent exited with code ${exitCode}`);
+    return {
+      verdict: "FAIL",
+      issues: [`Review agent exited with code ${exitCode}`],
+      summary: "Review could not be completed due to agent failure.",
+    };
+  }
+
+  // Parse verdict from agent output
+  return parseReviewVerdict(output);
+}
+
+function parseReviewVerdict(output: string): WorkstreamReviewResult {
+  const lines = output.split("\n");
+
+  // Find the VERDICT line (search from the end for the last occurrence)
+  let verdictIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim().startsWith("VERDICT:")) {
+      verdictIdx = i;
+      break;
+    }
+  }
+
+  if (verdictIdx === -1) {
+    return {
+      verdict: "FAIL",
+      issues: ["Review agent did not produce a VERDICT line"],
+      summary: "Could not parse review output.",
+    };
+  }
+
+  const verdictLine = lines[verdictIdx].trim();
+  const verdict = verdictLine.includes("PASS") ? "PASS" : "FAIL";
+
+  // Extract issues if FAIL
+  const issues: string[] = [];
+  if (verdict === "FAIL") {
+    // Look for ISSUES: section after the VERDICT line
+    let inIssues = false;
+    for (let i = verdictIdx + 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith("ISSUES:")) {
+        inIssues = true;
+        continue;
+      }
+      if (inIssues && line.startsWith("- ")) {
+        issues.push(line.slice(2));
+      } else if (inIssues && line === "") {
+        // Allow blank lines within issues
+        continue;
+      } else if (inIssues && !line.startsWith("- ") && line !== "") {
+        // Non-issue line encountered, stop parsing
+        break;
+      }
+    }
+
+    // If no ISSUES: section found, look for bullet points right after VERDICT
+    if (issues.length === 0) {
+      for (let i = verdictIdx + 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.startsWith("- ")) {
+          issues.push(line.slice(2));
+        }
+      }
+    }
+  }
+
+  // Build summary from the text before the verdict
+  const summaryLines = lines.slice(Math.max(0, verdictIdx - 5), verdictIdx)
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+  const summary = summaryLines.length > 0
+    ? summaryLines.join(" ")
+    : verdict === "PASS" ? "All checks passed." : "Review found issues.";
+
+  return { verdict, issues, summary };
+}
+
+/**
+ * Identify which tasks in a workstream are affected by review issues.
+ * Matches issues to tasks by checking if the issue text references task IDs or file paths.
+ * Falls back to returning all tasks if no specific matches are found.
+ */
+function identifyAffectedTasks(wsTasks: import("./constants.js").Task[], issues: string[]): import("./constants.js").Task[] {
+  if (issues.length === 0) return wsTasks;
+
+  const issueText = issues.join("\n").toLowerCase();
+  const matched = new Set<string>();
+
+  for (const task of wsTasks) {
+    // Match by task ID (e.g., "A1", "B2")
+    if (issueText.includes(task.id.toLowerCase())) {
+      matched.add(task.id);
+      continue;
+    }
+    // Match by file references
+    for (const file of task.files) {
+      if (issueText.includes(file.toLowerCase())) {
+        matched.add(task.id);
+        break;
+      }
+    }
+  }
+
+  // If no specific tasks matched, reset all tasks in the workstream
+  if (matched.size === 0) return wsTasks;
+
+  return wsTasks.filter(t => matched.has(t.id));
+}
 
 export async function runAgent(taskId: string, tasksPath: string, agentOverride?: string, autoContinue?: boolean, firedMilestones?: Set<number>) {
   const tasks = readTasks(tasksPath);
@@ -377,20 +665,54 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
   
   // Build specialist context if task has an assigned specialist
   let specialistContext = "";
+  let specialistPremises = "";
+  let specialistTestExpectations: string[] | undefined;
   if (task.specialist) {
     const specialists = discoverSpecialists(projectRoot);
     const specialist = specialists.find(s => s.name === task.specialist);
     if (specialist) {
       specialistContext = "\n" + resolveProfileContext(specialist, specialists) + "\n";
+      if (specialist.premises) {
+        specialistPremises = specialist.premises;
+      }
+      specialistTestExpectations = specialist.test_expectations;
       console.log(`   Specialist: ${specialist.name} (${specialist.type})\n`);
     }
   }
+
+  const defaultQualityGate = DEFAULT_QUALITY_GATE.map(s => `\n- ${s}`).join("");
+
+  const selfReviewBlock = `
+
+## Mandatory Self-Review Gate
+
+Before marking this task as done, you MUST perform a self-review. Do NOT consider the task complete until all checks pass.
+
+### 1. Scope Check
+- Re-read the task description above
+- Verify you implemented exactly what was described — nothing more, nothing less
+- If you added anything beyond the task scope, revert it
+
+### 2. Code Quality Check
+- Review all changes for correctness, readability, and maintainability${specialistPremises ? `
+- Apply the specialist's standards as the quality bar:
+${specialistPremises.split("\n").map(line => `  ${line}`).join("\n")}` : `
+- Apply these default quality standards:${defaultQualityGate}`}
+
+### 3. Test Coverage Check${specialistTestExpectations && specialistTestExpectations.length > 0
+? specialistTestExpectations.map(e => `\n- ${e}`).join("")
+: `
+- Ensure tests exist for all changes`}
+- Run the tests and confirm they pass
+- If tests are missing, write them before completing
+
+Only after all three checks pass should you consider this task complete.`;
 
   const taskPrompt = `Task: ${task.title}
 Description: ${task.description}
 Files to work on: ${task.files.join(", ")}${specialistContext}
 
-Please complete this task.`;
+Please complete this task.${selfReviewBlock}`;
   
   const args = [...agentConfig.args, taskPrompt];
 
@@ -575,65 +897,6 @@ Please complete this task.`;
   return true;
 }
 
-async function runWithTmux(
-  tasksPath: string,
-  cwd: string,
-  workstream?: string,
-  agentOverride?: string,
-  autoContinue?: boolean,
-  tasksFlag?: string,
-  planSlug?: string
-): Promise<void> {
-  const { spawnSync } = require("child_process");
-  const bartBin = process.argv[1];
-
-  const tasks = readTasks(tasksPath);
-  const workstreams: string[] = workstream
-    ? [workstream]
-    : [...new Set(
-        tasks.tasks
-          .filter(t => t.status !== "completed" && t.status !== "error")
-          .map(t => t.workstream)
-          .filter(Boolean)
-      )] as string[];
-
-  if (workstreams.length === 0) {
-    console.log("No pending workstreams to run in tmux.");
-    return;
-  }
-
-  // Build flags to forward to each per-workstream invocation
-  const baseFlags: string[] = [];
-  if (tasksFlag) baseFlags.push("--tasks", tasksFlag);
-  else if (planSlug) baseFlags.push("--plan", planSlug);
-  if (agentOverride) baseFlags.push("--agent", agentOverride);
-  if (autoContinue === true) baseFlags.push("--auto-continue");
-  if (autoContinue === false) baseFlags.push("--no-auto-continue");
-
-  const sessionName = "bart";
-
-  const sessionCheck = spawnSync("tmux", ["has-session", "-t", sessionName], { stdio: "ignore" });
-  const sessionExists = sessionCheck.status === 0;
-
-  for (let i = 0; i < workstreams.length; i++) {
-    const ws = workstreams[i];
-    const windowName = `ws-${ws}`;
-    const cmd = [bartBin, "run", "--workstream", ws, ...baseFlags].join(" ");
-
-    if (i === 0 && !sessionExists) {
-      spawnSync("tmux", ["new-session", "-d", "-s", sessionName, "-n", windowName, cmd], { stdio: "ignore" });
-    } else {
-      spawnSync("tmux", ["new-window", "-t", sessionName, "-n", windowName, cmd], { stdio: "ignore" });
-    }
-  }
-
-  console.log(`\n   Launched ${workstreams.length} tmux window(s) in session '${sessionName}'`);
-  console.log(`   Workstreams: ${workstreams.join(", ")}`);
-  console.log(`\nAttaching to tmux session '${sessionName}'... (Ctrl+B, D to detach)`);
-
-  spawnSync("tmux", ["attach-session", "-t", sessionName], { stdio: "inherit" });
-}
-
 export async function main() {
   const args = process.argv.slice(2);
   const cwd = getCwd();
@@ -649,7 +912,6 @@ export async function main() {
   let telegramSetup = false;
   let showHistory = false;
   let showBoard = false;
-  let useTmux = false;
 
   const remainingArgs: string[] = [];
   let skipNext = false;
@@ -682,8 +944,6 @@ export async function main() {
       showBoard = true;
     } else if (arg === "--telegram") {
       telegramSetup = true;
-    } else if (arg === "--tmux") {
-      useTmux = true;
     } else if (!arg.startsWith("-") || arg === "-a") {
       remainingArgs.push(arg);
     }
@@ -763,12 +1023,6 @@ export async function main() {
       // Acquire lock so other bart processes know we're running
       acquireLock(cwd);
 
-      if (useTmux) {
-        await runWithTmux(tasksPath, cwd, workstream, agentOverride, autoContinue, tasksFlag, planSlug);
-        releaseLock(cwd);
-        break;
-      }
-
       if (specificTask) {
         await runAgent(specificTask, tasksPath, agentOverride, autoContinue);
         releaseLock(cwd);
@@ -777,6 +1031,8 @@ export async function main() {
         let iterations = 0;
         // Seed milestones already passed before this execution started [REQ-08]
         const firedMilestones = new Set<number>();
+        // Track workstreams that passed review in this session to avoid re-reviewing [REQ-02]
+        const passedWorkstreams = new Set<string>();
         {
           const initialTasks = readTasks(tasksPath);
           const initCompleted = initialTasks.tasks.filter(t => t.status === "completed").length;
@@ -816,7 +1072,7 @@ export async function main() {
             const currentTask = tasksAfter.tasks.find(t => t.id === next);
             const ws = currentTask?.workstream;
 
-            if (ws) {
+            if (ws && !passedWorkstreams.has(ws)) {
               const wsTasks = tasksAfter.tasks.filter(t => t.workstream === ws);
               const wsCompleted = wsTasks.filter(t => t.status === "completed").length;
               const wsTotal = wsTasks.length;
@@ -824,6 +1080,145 @@ export async function main() {
               if (wsCompleted === wsTotal) {
                 console.log(`\n🎉 Workstream ${ws} completed!`);
                 await sendTelegram(formatWorkstreamCompleted(ws, wsCompleted, wsTotal));
+
+                // Run workstream review [REQ-02]
+                console.log("\n" + "=".repeat(50));
+                console.log(`🔍 Running workstream review for: ${ws}`);
+                const reviewResult = await runWorkstreamReview(ws, tasksPath, agentOverride);
+                const planSlugForReview = extractPlanSlug(tasksPath);
+                const projectRoot = tasksAfter.project_root || process.cwd();
+
+                if (reviewResult.verdict === "PASS") {
+                  console.log(`\n✅ Workstream ${ws} review: PASS`);
+                  console.log(`   ${reviewResult.summary}`);
+                  await sendTelegram(formatWorkstreamReview(ws, "PASS", reviewResult.summary, []));
+                  passedWorkstreams.add(ws);
+
+                  // Record review pass in history [REQ-03]
+                  appendHistory(projectRoot, {
+                    timestamp: new Date().toISOString(),
+                    event: "review_pass",
+                    task_id: ws,
+                    plan_slug: planSlugForReview,
+                    specialist: null,
+                    status: "review_pass",
+                    duration_ms: null,
+                    resets: 0,
+                    files: [...new Set(wsTasks.flatMap(t => t.files))],
+                    workstream: ws,
+                    title: `Workstream ${ws} review passed`,
+                  });
+                } else {
+                  // Review FAILED — trigger auto-retry [REQ-03]
+                  console.log(`\n❌ Workstream ${ws} review: FAIL`);
+                  console.log(`   ${reviewResult.summary}`);
+                  for (const issue of reviewResult.issues) {
+                    console.log(`   • ${issue}`);
+                  }
+                  await sendTelegram(formatWorkstreamReview(ws, "FAIL", reviewResult.summary, reviewResult.issues));
+
+                  // Identify affected tasks: match issues to tasks by file or ID references,
+                  // or reset all tasks in the workstream if no specific match
+                  const affectedTasks = identifyAffectedTasks(wsTasks, reviewResult.issues);
+                  const affectedTaskIds = affectedTasks.map(t => t.id);
+
+                  // Per-task retry tracking [REQ-03]: check each task's prior review retries
+                  const historyEntries = loadHistory(projectRoot);
+                  const tasksToReset: string[] = [];
+                  const tasksToEscalate: string[] = [];
+
+                  for (const tid of affectedTaskIds) {
+                    const priorRetries = countReviewRetriesForTask(historyEntries, tid, planSlugForReview);
+                    if (priorRetries >= 2) {
+                      tasksToEscalate.push(tid);
+                    } else {
+                      tasksToReset.push(tid);
+                    }
+                  }
+
+                  // Record review failure in history (includes all affected tasks)
+                  const priorWsFailures = countWorkstreamReviewFailures(projectRoot, ws, planSlugForReview);
+                  appendHistory(projectRoot, {
+                    timestamp: new Date().toISOString(),
+                    event: "review_fail",
+                    task_id: ws,
+                    plan_slug: planSlugForReview,
+                    specialist: null,
+                    status: "review_fail",
+                    duration_ms: null,
+                    resets: priorWsFailures + 1,
+                    files: [...new Set(wsTasks.flatMap(t => t.files))],
+                    workstream: ws,
+                    title: `Workstream ${ws} review failed`,
+                    review_issues: reviewResult.issues,
+                    tasks_reset: tasksToReset,
+                  });
+
+                  // Handle escalated tasks — mark as needs_escalation [REQ-03]
+                  if (tasksToEscalate.length > 0) {
+                    console.log(`\n🚨 ${tasksToEscalate.length} task(s) exceeded retry limit (2) — escalating: ${tasksToEscalate.join(", ")}`);
+                    const escalateTasksData = readTasks(tasksPath);
+                    for (const tid of tasksToEscalate) {
+                      const idx = escalateTasksData.tasks.findIndex(t => t.id === tid);
+                      if (idx !== -1) {
+                        escalateTasksData.tasks[idx].status = "needs_escalation";
+                        escalateTasksData.tasks[idx].error = `Review failed ${countReviewRetriesForTask(historyEntries, tid, planSlugForReview) + 1} times: ${reviewResult.issues.join("; ")}`;
+                      }
+                    }
+                    writeFileSync(tasksPath, JSON.stringify(escalateTasksData, null, 2));
+                    await sendTelegram(formatReviewEscalation(ws, tasksToEscalate, 3));
+                  }
+
+                  // Handle retryable tasks — reset to pending with feedback [REQ-03]
+                  if (tasksToReset.length > 0) {
+                    console.log(`\n🔄 Retrying ${tasksToReset.length} task(s) in workstream ${ws}: ${tasksToReset.join(", ")}`);
+
+                    const retryTasksData = readTasks(tasksPath);
+                    const feedbackPrefix = `[REVIEW FEEDBACK]: ${reviewResult.issues.join("; ")}`;
+
+                    for (const tid of tasksToReset) {
+                      const idx = retryTasksData.tasks.findIndex(t => t.id === tid);
+                      if (idx !== -1) {
+                        retryTasksData.tasks[idx].status = "pending";
+                        retryTasksData.tasks[idx].started_at = null;
+                        retryTasksData.tasks[idx].completed_at = null;
+                        retryTasksData.tasks[idx].error = null;
+                        // Prepend review feedback to description so the re-executing agent sees it
+                        if (!retryTasksData.tasks[idx].description.startsWith("[REVIEW FEEDBACK]:")) {
+                          retryTasksData.tasks[idx].description = `${feedbackPrefix}\n\n${retryTasksData.tasks[idx].description}`;
+                        } else {
+                          // Replace existing feedback with latest
+                          retryTasksData.tasks[idx].description = retryTasksData.tasks[idx].description.replace(
+                            /^\[REVIEW FEEDBACK\]:.*?\n\n/s,
+                            `${feedbackPrefix}\n\n`
+                          );
+                        }
+
+                        // Record reset in history
+                        appendHistory(projectRoot, {
+                          timestamp: new Date().toISOString(),
+                          event: "reset",
+                          task_id: tid,
+                          plan_slug: planSlugForReview,
+                          specialist: retryTasksData.tasks[idx].specialist || null,
+                          status: "reset",
+                          duration_ms: null,
+                          resets: countResetsForTask(projectRoot, tid, planSlugForReview) + 1,
+                          files: retryTasksData.tasks[idx].files,
+                          workstream: ws,
+                          title: retryTasksData.tasks[idx].title,
+                        });
+                      }
+                    }
+                    writeFileSync(tasksPath, JSON.stringify(retryTasksData, null, 2));
+                    console.log(`   Tasks reset with review feedback — loop will re-execute them`);
+                  }
+
+                  // If all affected tasks are escalated, mark workstream as done retrying
+                  if (tasksToReset.length === 0) {
+                    passedWorkstreams.add(ws);
+                  }
+                }
               }
             }
 
@@ -944,11 +1339,21 @@ export async function main() {
         }
         
         const finalTasks = readTasks(tasksPath);
-        const allDone = finalTasks.tasks.every(t =>
-          !workstream || t.workstream === workstream ? t.status === "completed" : true
+        const relevantTasks = finalTasks.tasks.filter(t =>
+          !workstream || t.workstream === workstream
         );
-        if (allDone) {
+        const allDone = relevantTasks.every(t =>
+          t.status === "completed" || t.status === "needs_escalation"
+        );
+        const escalated = relevantTasks.filter(t => t.status === "needs_escalation");
+        if (allDone && escalated.length === 0) {
           console.log("\n🎉 All tasks completed!");
+        } else if (allDone && escalated.length > 0) {
+          console.log(`\n⚠️  Run complete. ${escalated.length} task(s) need manual intervention:`);
+          for (const t of escalated) {
+            console.log(`   🚨 ${t.id}: ${t.title}`);
+          }
+          console.log("   Use 'bart status' for details.");
         } else {
           console.log("\n📊 Run complete. Use 'bart status' to see progress.");
         }
@@ -1168,14 +1573,26 @@ export async function main() {
         thinkArgs = [];
       }
 
-      const thinkChild = spawn(thinkCmd, thinkArgs, {
-        cwd,
-        stdio: "inherit"
-      });
+      // Install signal handlers so mode is cleared on SIGINT/SIGTERM
+      installSignalHandlers(cwd);
 
-      await new Promise<void>((resolve) => {
-        thinkChild.on("close", () => resolve());
-      });
+      // Set mode to "thinking" so hooks can block execution tools
+      setMode(cwd, "thinking");
+
+      try {
+        const thinkChild = spawn(thinkCmd, thinkArgs, {
+          cwd,
+          stdio: "inherit"
+        });
+
+        await new Promise<void>((resolve) => {
+          thinkChild.on("close", () => resolve());
+          thinkChild.on("error", () => resolve());
+        });
+      } finally {
+        // Clear mode when the thinking session ends (including on crash/error)
+        clearMode(cwd);
+      }
 
       // After session ends, check if a new plan was written
       const plansAfter = existsSync(plansDir) ? readdirSync(plansDir) : [];
@@ -1199,11 +1616,23 @@ export async function main() {
       break;
 
     case "plan":
-    case "p":
+    case "p": {
       const useLatestPlan = args.includes("--latest") || args.includes("-l");
       const autoConfirm = args.includes("-y") || args.includes("--yes");
-      await runPlanCommand(cwd, tasksPath, planFilePath, useLatestPlan, autoConfirm);
+
+      // Install signal handlers so mode is cleared on SIGINT/SIGTERM
+      installSignalHandlers(cwd);
+
+      // Set mode to "planning" so hooks can block execution tools
+      setMode(cwd, "planning");
+
+      try {
+        await runPlanCommand(cwd, tasksPath, planFilePath, useLatestPlan, autoConfirm);
+      } finally {
+        clearMode(cwd);
+      }
       break;
+    }
       
     case "requirements":
     case "reqs":
@@ -1466,156 +1895,6 @@ export async function main() {
       showHelp();
       break;
       
-    case "collab": {
-      const subcommand = remainingArgs[1];
-      const isForeground = args.includes("--foreground");
-      const { spawnSync: tmuxSpawn } = require("child_process");
-      const bartBin = `${process.execPath} ${process.argv[1]}`;
-      const collabSessionName = "bart";
-      const collabWindowName = "collab";
-
-      function spawnCollabInTmux(cmd: string): void {
-        const sessionCheck = tmuxSpawn("tmux", ["has-session", "-t", collabSessionName], { stdio: "ignore" });
-        const sessionExists = sessionCheck.status === 0;
-
-        // Kill any stale collab window from a previous run so we get a fresh one
-        // and switch-client reliably lands on the new process.
-        if (sessionExists) {
-          tmuxSpawn("tmux", ["kill-window", "-t", `${collabSessionName}:${collabWindowName}`], { stdio: "ignore" });
-        }
-
-        if (sessionExists) {
-          tmuxSpawn("tmux", ["new-window", "-t", collabSessionName, "-n", collabWindowName, cmd], { stdio: "ignore" });
-        } else {
-          tmuxSpawn("tmux", ["new-session", "-d", "-s", collabSessionName, "-n", collabWindowName, cmd], { stdio: "ignore" });
-        }
-
-        // Keep the window alive on exit so any crash/error output stays readable.
-        tmuxSpawn("tmux", ["set-window-option", "-t", `${collabSessionName}:${collabWindowName}`, "remain-on-exit", "on"], { stdio: "ignore" });
-
-        console.log(`\nAttaching to tmux session '${collabSessionName}' (Ctrl+B, D to detach)\n`);
-        if (process.env.TMUX) {
-          tmuxSpawn("tmux", ["switch-client", "-t", `${collabSessionName}:${collabWindowName}`], { stdio: "inherit" });
-        } else {
-          tmuxSpawn("tmux", ["attach-session", "-t", `${collabSessionName}:${collabWindowName}`], { stdio: "inherit" });
-        }
-      }
-
-      if (subcommand === "start") {
-        if (!isForeground) {
-          // Spawn the session in the background and read the join code from its stdout.
-          const child = spawn(process.execPath, [process.argv[1], "collab", "start", "--foreground"], {
-            detached: true,
-            stdio: ["ignore", "pipe", "ignore"],
-          });
-
-          await new Promise<void>((resolve, reject) => {
-            let buf = "";
-            child.stdout!.on("data", (chunk: Buffer) => {
-              buf += chunk.toString();
-              const m = buf.match(/Join code: ([A-Z0-9]{6})/);
-              if (m) {
-                console.log(`\nCollab session started in background (pid ${child.pid}).`);
-                console.log(`Join code: ${m[1]}`);
-                console.log(`\nShare this code with teammates. They can join with:\n  bart collab join ${m[1]}\n`);
-                resolve();
-              }
-            });
-            child.once("error", reject);
-            child.once("exit", (code) => reject(new Error(`collab process exited with code ${code}`)));
-          });
-
-          child.stdout!.unref();
-          child.unref();
-          break;
-        }
-
-        const session = new CollabSession();
-        const code = await session.host();
-
-        console.log(`\nCollab session started.`);
-        console.log(`Join code: ${code}`);
-        console.log(`\nShare this code with teammates. They can join with:\n  bart collab join ${code}\n`);
-        console.log("Waiting for peers... (Ctrl+C to stop)\n");
-
-        session.on("peer-join", (peer) => {
-          console.log(`  + ${peer.gitName} joined`);
-        });
-        session.on("peer-leave", (peerId) => {
-          console.log(`  - peer ${peerId} left`);
-        });
-        session.on("error", (err: Error) => {
-          console.error("Collab error:", err.message);
-        });
-
-        process.on("SIGINT", () => {
-          session.close();
-          process.exit(0);
-        });
-
-        // Keep the process alive
-        await new Promise(() => {});
-      } else if (subcommand === "join") {
-        const code = remainingArgs[2]?.toUpperCase();
-        if (!code) {
-          console.error("Usage: bart collab join <code>");
-          process.exit(1);
-        }
-
-        if (!isForeground) {
-          spawnCollabInTmux(`${bartBin} collab join ${code} --foreground`);
-          break;
-        }
-
-        const session = new CollabSession();
-        console.log(`\nLooking for collab session with code ${code}...`);
-        try {
-          await session.join(code);
-        } catch (err: unknown) {
-          console.error("Failed to join:", err instanceof Error ? err.message : String(err));
-          process.exit(1);
-        }
-
-        const peers = Array.from(session.state.peers.values()).filter(
-          (p) => p.id !== session.localPeer.id
-        );
-        console.log(`Connected! Session has ${peers.length + 1} peer(s):`);
-        for (const p of session.state.peers.values()) {
-          const label = p.id === session.localPeer.id ? " (you)" : "";
-          console.log(`  ${p.gitName}${label}`);
-        }
-        console.log("\n(Ctrl+C to disconnect)\n");
-
-        session.on("peer-join", (peer) => {
-          console.log(`  + ${peer.gitName} joined`);
-        });
-        session.on("peer-leave", (peerId) => {
-          console.log(`  - peer ${peerId} left`);
-        });
-        session.on("error", (err: Error) => {
-          console.error("Collab error:", err.message);
-        });
-
-        process.on("SIGINT", () => {
-          session.close();
-          process.exit(0);
-        });
-
-        // Launch local dashboard to show task progress alongside the session (REQ-03)
-        if (existsSync(tasksPath)) {
-          await runDashboard(tasksPath);
-          session.close();
-        } else {
-          await new Promise(() => {});
-        }
-      } else {
-        console.log("Usage:");
-        console.log("  bart collab start          Start a collab session and get a join code");
-        console.log("  bart collab join <code>    Join an existing collab session by code");
-      }
-      break;
-    }
-
     default:
       console.log(`Unknown command: ${command}`);
       showHelp();

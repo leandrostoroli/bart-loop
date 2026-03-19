@@ -255,6 +255,10 @@ export function parseFrontmatter(content: string): Record<string, any> {
  *   skills: string[]    — referenced skill names to resolve at runtime
  *   standards: string[] — coding standards or guidelines to follow
  *   agents: string[]    — referenced agent names to resolve at runtime
+ *   test_expectations: string[] — custom test coverage requirements for self-review gate
+ *                                 (e.g. "unit tests for all public functions",
+ *                                  "integration test for API endpoints")
+ *                                 Falls back to default "tests exist for changes" when absent
  *
  * Body sections (parsed from markdown headings):
  *   ## Premises  — guidelines, rules, and standards (stored in `premises`)
@@ -281,6 +285,7 @@ export function parseProfile(filePath: string): Specialist | null {
   const skills = toList(fm.skills);
   const standards = toList(fm.standards);
   const agents = toList(fm.agents);
+  const test_expectations = toList(fm.test_expectations || fm["test-expectations"]);
   const role = typeof fm.role === "string" ? fm.role.trim() : undefined;
   const description = typeof fm.description === "string"
     ? fm.description.split("\n")[0].trim()
@@ -329,6 +334,7 @@ export function parseProfile(filePath: string): Specialist | null {
     agents: agents.length > 0 ? agents : undefined,
     premises,
     learnings: learnings.length > 0 ? learnings : undefined,
+    test_expectations: test_expectations.length > 0 ? test_expectations : undefined,
   };
 }
 
@@ -917,6 +923,17 @@ export function countWorkstreamErrors(cwd: string, workstream: string, planSlug:
     }
   }
   return erroredTasks.size;
+}
+
+/**
+ * Count the number of review_fail events for a workstream+plan combination.
+ * This tracks how many times the workstream review has failed and tasks were retried.
+ */
+export function countWorkstreamReviewFailures(cwd: string, workstream: string, planSlug: string): number {
+  const entries = loadHistory(cwd);
+  return entries.filter(
+    e => e.event === "review_fail" && e.workstream === workstream && e.plan_slug === planSlug
+  ).length;
 }
 
 /**

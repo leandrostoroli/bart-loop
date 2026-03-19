@@ -131,3 +131,19 @@ export function formatMilestone(percentage: number, completed: number, total: nu
     `${completed}/${total} tasks done${ws}`;
 }
 
+export function formatWorkstreamReview(workstream: string, verdict: "PASS" | "FAIL", summary: string, issues: string[]): string {
+  if (verdict === "PASS") {
+    return `✅ *Workstream ${workstream} review PASSED*\n${summary}`;
+  }
+  const issueList = issues.length > 0
+    ? `\n${issues.map(i => `• ${i}`).join("\n")}`
+    : "";
+  return `❌ *Workstream ${workstream} review FAILED*\n${summary}${issueList}`;
+}
+
+export function formatReviewEscalation(workstream: string, taskIds: string[], retryCount: number): string {
+  return `🚨 *ESCALATION: Workstream ${workstream}*\n` +
+    `Tasks failed review ${retryCount} times and need manual intervention:\n` +
+    taskIds.map(id => `• ${id}`).join("\n");
+}
+

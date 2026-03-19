@@ -6,12 +6,18 @@ description: |
   I build", "explore this idea", or runs /bart-think. This skill guides structured problem
   exploration, captures decisions, and writes a bart-format plan directly — no conversion step
   needed.
-version: 1.0.0
+version: 2.0.0
 ---
 
 # Bart Think — Guided Problem Exploration
 
 You guide users through structured thinking before planning. Unlike bart-plan (which converts existing plans), you help users **discover what to build** through conversation, then write a bart-format plan directly.
+
+## Tool Restrictions
+
+**CRITICAL: During Phases 1–4, you MUST NOT use Edit, Write, or Bash tools.** You are in conversation mode only. The system will block these tool calls, but you should not attempt them. Only use file-writing tools in Phase 5 to write the plan file.
+
+Read-only tools (Read, Glob, Grep) are allowed at any phase for research.
 
 ## Input
 
@@ -90,16 +96,24 @@ Does this look right? Anything to add or remove?
 
 If the user tries to expand scope significantly, push back: "That sounds like a separate effort. Let's finish this first and tackle that next."
 
-### Phase 5: Write Outputs
+### Phase 5: Write Plan
 
-Once scope is confirmed, write two files:
+Once scope is confirmed, write a single plan file that combines decisions, requirements, and workstream tasks.
 
-#### 5a. Context file: `.bart/CONTEXT.md`
+**Before writing the plan**, discover available specialists:
+
+```bash
+bart specialists --history 2>/dev/null || echo "No specialists found"
+```
+
+Propose specialist assignments for each task (same process as bart-plan Step 3c — present a table and ask for confirmation before writing).
+
+#### Output: `.bart/plans/<YYYY-MM-DD>-<slug>/plan.md`
+
+Write directly in bart format — this is the key advantage over bart-plan. No conversion needed.
 
 ```markdown
-# Context: [Project/Feature Name]
-
-Created: [date]
+# Plan: [Title]
 
 ## Decisions
 
@@ -111,25 +125,6 @@ Created: [date]
 
 ### Deferred
 - [Thing]: Not in scope for this effort
-
-## Specialist Performance
-
-### Effective
-- [Specialist]: [Observation — e.g., "8/8 completed, avg 3m, React component tasks"]
-
-### Needs Attention
-- [Specialist]: [Observation — e.g., "3 resets on DB tasks, may need schema context"]
-
-### Untested
-- [Specialist]: [Available but no history data]
-```
-
-#### 5b. Plan file: `.bart/plans/<YYYY-MM-DD>-<slug>/plan.md`
-
-Write directly in bart format — this is the key advantage over bart-plan. No conversion needed.
-
-```markdown
-# Plan: [Title]
 
 ## Requirements
 - [REQ-01] [Requirement derived from locked decisions and scope]
@@ -145,28 +140,24 @@ Files: [specific files]
 Files: [specific files]
 ```
 
-**Before writing the plan**, discover available specialists:
+The `## Decisions` section must appear before `## Requirements`. The bart plan parser skips `## Decisions` (like it skips `## Requirements`) when calculating workstream boundaries — it is metadata, not a workstream.
 
-```bash
-bart specialists --history 2>/dev/null || echo "No specialists found"
-```
+### Phase 6: Auto-Invoke Review
 
-Propose specialist assignments for each task (same process as bart-plan Step 3c — present a table and ask for confirmation before writing).
-
-### Phase 6: Signal Completion
-
-After writing both files, output the completion summary:
+After writing the plan file, **do NOT signal completion**. Instead, immediately invoke the `bart-think-review` skill to review the plan output:
 
 ```
 Plan written to .bart/plans/<slug>/plan.md
-Context saved to .bart/CONTEXT.md
 
-- X requirements
-- Y tasks across Z workstreams
-- Specialists: [list or "none"]
-
-You can now exit the session — bart will automatically detect the plan and convert it to tasks.
+Invoking bart-think-review to validate the plan before proceeding...
 ```
+
+Then invoke the skill:
+```
+/bart-think-review .bart/plans/<slug>/plan.md
+```
+
+This auto-chains into the review phase — the user does not need to manually trigger it.
 
 ## Key Principles
 
@@ -176,3 +167,5 @@ You can now exit the session — bart will automatically detect the plan and con
 4. **Scope is sacred** — Once confirmed, defend it. New ideas go to "deferred"
 5. **Write bart format directly** — No intermediate steps, no conversion needed
 6. **Specialist-aware** — Discover and assign specialists before writing the plan
+7. **No tools during conversation** — Phases 1–4 are conversation only. No Edit, Write, or Bash calls
+8. **Single output file** — Decisions live inside plan.md, not in a separate CONTEXT.md

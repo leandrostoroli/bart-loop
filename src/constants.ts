@@ -18,7 +18,7 @@ export interface Task {
   description: string;
   files: string[];
   depends_on: string[];
-  status: "pending" | "in_progress" | "completed" | "error";
+  status: "pending" | "in_progress" | "completed" | "error" | "needs_escalation";
   requirements?: string[];  // REQ-IDs this task covers (explicit or auto-generated)
   specialist?: string;       // Matched specialist name (e.g., "code-architect")
   files_modified: string[];
@@ -46,6 +46,7 @@ export interface Specialist {
   agents?: string[];      // Referenced agent names (profile-specific)
   premises?: string;      // Content from profile body (guidelines, rules, standards)
   learnings?: string[];   // Parsed learning entries appended over time
+  test_expectations?: string[];  // Custom test coverage expectations (e.g., "unit tests for all public functions")
 }
 
 export interface TasksData {
@@ -57,18 +58,27 @@ export interface TasksData {
   tasks: Task[];
 }
 
+/** Default quality standards applied when a task has no specialist assigned. */
+export const DEFAULT_QUALITY_GATE = [
+  "Follow existing code style, naming conventions, and patterns in the files you modify",
+  "Do not introduce new dependencies or abstractions unless the task requires it",
+  "Keep changes minimal and focused — avoid unrelated refactors or cleanups",
+];
+
 export const HISTORY_FILE = "history.jsonl";
 
 export interface HistoryEntry {
   timestamp: string;          // ISO 8601
-  event: "completed" | "error" | "reset";
+  event: "completed" | "error" | "reset" | "review_pass" | "review_fail";
   task_id: string;
   plan_slug: string;          // directory name from .bart/plans/<slug>/ or "_legacy"
   specialist: string | null;
-  status: "completed" | "error" | "reset";
+  status: "completed" | "error" | "reset" | "review_pass" | "review_fail";
   duration_ms: number | null; // null for resets
   resets: number;             // count of prior resets for this task+plan
   files: string[];
   workstream: string;
   title: string;
+  review_issues?: string[];   // issues reported by workstream reviewer (review_fail events)
+  tasks_reset?: string[];     // task IDs reset due to review failure
 }

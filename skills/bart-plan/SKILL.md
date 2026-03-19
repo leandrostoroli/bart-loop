@@ -30,6 +30,12 @@ This skill auto-triggers as a **pre-implementation hook** when:
 
 When auto-triggered, skip asking the user for plan source — proceed directly with conversion using the plan that was just created. However, **always pause at Step 3c** to confirm skill/agent assignments with the user before writing the final plan.
 
+## Tool Restrictions
+
+**CRITICAL: During Steps 1–6, you MUST NOT use Edit, Write, or Bash tools.** You are in conversation mode only. The system will block these tool calls, but you should not attempt them. Only use file-writing tools in Step 7 to write the plan file.
+
+Read-only tools (Read, Glob, Grep) are allowed at any step for research. Bash is permitted only in Step 3a for specialist discovery commands (`bart specialists`).
+
 ## How It Works
 
 The user triggers this skill manually or it auto-triggers before plan implementation. You then:
@@ -231,7 +237,7 @@ Before outputting the plan, verify:
 - [ ] File paths are realistic and specific (not generic placeholders)
 - [ ] Every work item from the source plan is represented in the output
 
-## Step 7: Write and Confirm
+## Step 7: Write and Review
 
 Save the converted plan into its own directory under `.bart/plans/`:
 
@@ -245,16 +251,10 @@ The slug is derived from the plan's `# Plan: ...` title, lowercased and hyphenat
 
 Note: `tasks.json` is generated separately when the user runs `bart plan` — do not create it yourself. The `bart plan` command parses `plan.md` and produces a co-located `tasks.json` in the same directory.
 
-Then tell the user:
+After writing the file, **auto-invoke bart-plan-review** with the plan path as the argument. Do NOT print a completion summary — the review skill handles validation, user checkpoint, and final output with next steps.
 
 ```
-Plan converted from [source] → .bart/plans/<slug>/plan.md
-- X requirements derived
-- Y tasks across Z workstreams
-- Specialists used: [list or "none"]
-- Coverage: all requirements mapped / N uncovered
-
-Next: run `bart plan` to generate tasks, then `bart run` to execute.
+/bart-plan-review .bart/plans/<slug>/plan.md
 ```
 
 ## Conversion Example

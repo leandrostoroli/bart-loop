@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, readdirSync, statSync } from "fs";
 import { join, dirname } from "path";
-import { Task, TasksData, Requirement, BART_DIR } from "./constants.js";
+import { Task, TasksData, Requirement, BART_DIR, HistoryEntry } from "./constants.js";
 
 export function findFile(name: string, startDir: string): string | null {
   let dir = startDir;
@@ -99,6 +99,18 @@ export function resolvePlanTasksPath(cwd: string, planSlug?: string): string {
   const legacyFile = join(BART_DIR, "tasks.json");
   const legacyPath = findFile(legacyFile, cwd);
   return legacyPath || join(cwd, legacyFile);
+}
+
+/**
+ * Count how many times a specific task was reset due to review failure.
+ * Looks at review_fail events that list this task in their tasks_reset array.
+ */
+export function countReviewRetriesForTask(entries: HistoryEntry[], taskId: string, planSlug: string): number {
+  return entries.filter(
+    e => e.event === "review_fail"
+      && e.plan_slug === planSlug
+      && e.tasks_reset?.includes(taskId)
+  ).length;
 }
 
 export function calculateCoverage(tasks: TasksData): Requirement[] {
