@@ -743,6 +743,67 @@ Please complete this task.${selfReviewBlock}`;
 }
 
 /**
+ * Append review feedback to a task-{id}.md file when a workstream review rejects the task.
+ * Adds a `## Review Feedback` section (if not present) and appends a numbered attempt subsection.
+ * Returns true if feedback was appended, false if the file does not exist (fallback to tasks.json).
+ */
+export function appendReviewFeedback(taskMdPath: string, issues: string[]): boolean {
+  if (!existsSync(taskMdPath)) {
+    return false;
+  }
+
+  const content = readFileSync(taskMdPath, "utf-8");
+
+  // Count existing attempt subsections to determine the next attempt number
+  const attemptMatches = content.match(/### Attempt \d+ — REJECTED/g);
+  const attemptNumber = attemptMatches ? attemptMatches.length + 1 : 1;
+
+  const issuesList = issues.map(issue => `- ${issue}`).join("\n");
+  const attemptBlock = `### Attempt ${attemptNumber} — REJECTED\n${issuesList}\n`;
+
+  let newContent: string;
+  if (content.includes("## Review Feedback")) {
+    // Append new attempt to existing feedback section
+    newContent = content.trimEnd() + "\n\n" + attemptBlock;
+  } else {
+    // Add new feedback section at end
+    newContent = content.trimEnd() + "\n\n## Review Feedback\n\n" + attemptBlock;
+  }
+
+  writeFileSync(taskMdPath, newContent);
+  return true;
+}
+
+/**
+ * Mark review feedback as resolved in a task-{id}.md file.
+ * Appends a `### Resolved` subsection to the existing `## Review Feedback` section.
+ * Returns true if resolved marker was appended, false if:
+ * - The file does not exist
+ * - No `## Review Feedback` section exists
+ * - Already resolved (idempotent)
+ */
+export function markReviewFeedbackResolved(taskMdPath: string): boolean {
+  if (!existsSync(taskMdPath)) {
+    return false;
+  }
+
+  const content = readFileSync(taskMdPath, "utf-8");
+
+  if (!content.includes("## Review Feedback")) {
+    return false;
+  }
+
+  if (content.includes("### Resolved")) {
+    return false;
+  }
+
+  const resolvedBlock = `### Resolved\nAll previous review issues have been addressed. Review passed.\n`;
+  const newContent = content.trimEnd() + "\n\n" + resolvedBlock;
+  writeFileSync(taskMdPath, newContent);
+  return true;
+}
+
+/**
  * Assemble the full task prompt with DoD extraction from task markdown.
  * This encapsulates the prompt-assembly logic used by runAgent, making it testable.
  * Reads the task markdown file (if present), extracts Definition of Done,
@@ -1237,6 +1298,12 @@ export async function main() {
                   await sendTelegram(formatWorkstreamReview(ws, "PASS", reviewResult.summary, []));
                   passedWorkstreams.add(ws);
 
+                  // Mark review feedback as resolved in each task's markdown [REQ-02] [REQ-03]
+                  for (const t of wsTasks.filter(t => t.status === "completed")) {
+                    const taskMdPath = join(dirname(tasksPath), `task-${t.id}.md`);
+                    markReviewFeedbackResolved(taskMdPath);
+                  }
+
                   // Record review pass in history [REQ-03]
                   appendHistory(projectRoot, {
                     timestamp: new Date().toISOString(),
@@ -1326,15 +1393,21 @@ export async function main() {
                         retryTasksData.tasks[idx].started_at = null;
                         retryTasksData.tasks[idx].completed_at = null;
                         retryTasksData.tasks[idx].error = null;
-                        // Prepend review feedback to description so the re-executing agent sees it
-                        if (!retryTasksData.tasks[idx].description.startsWith("[REVIEW FEEDBACK]:")) {
-                          retryTasksData.tasks[idx].description = `${feedbackPrefix}\n\n${retryTasksData.tasks[idx].description}`;
-                        } else {
-                          // Replace existing feedback with latest
-                          retryTasksData.tasks[idx].description = retryTasksData.tasks[idx].description.replace(
-                            /^\[REVIEW FEEDBACK\]:.*?\n\n/s,
-                            `${feedbackPrefix}\n\n`
-                          );
+                        // Append review feedback to task-{id}.md if it exists [REQ-01]
+                        const taskMdPath = join(dirname(tasksPath), `task-${tid}.md`);
+                        const feedbackAppended = appendReviewFeedback(taskMdPath, reviewResult.issues);
+
+                        // Fall back to tasks.json description feedback if no .md file [REQ-04]
+                        if (!feedbackAppended) {
+                          if (!retryTasksData.tasks[idx].description.startsWith("[REVIEW FEEDBACK]:")) {
+                            retryTasksData.tasks[idx].description = `${feedbackPrefix}\n\n${retryTasksData.tasks[idx].description}`;
+                          } else {
+                            // Replace existing feedback with latest
+                            retryTasksData.tasks[idx].description = retryTasksData.tasks[idx].description.replace(
+                              /^\[REVIEW FEEDBACK\]:.*?\n\n/s,
+                              `${feedbackPrefix}\n\n`
+                            );
+                          }
                         }
 
                         // Record reset in history

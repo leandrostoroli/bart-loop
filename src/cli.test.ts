@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
-import { existsSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
-import { buildTestingContextBlock, buildSelfReviewBlock, buildTaskPrompt, extractDefinitionOfDone } from "./cli.js";
+import { buildTestingContextBlock, buildSelfReviewBlock, buildTaskPrompt, extractDefinitionOfDone, appendReviewFeedback, markReviewFeedbackResolved } from "./cli.js";
 import type { Task } from "./constants.js";
 
 // =============================================================================
@@ -555,6 +555,291 @@ Instructions.
     expect(prompt).toContain("Follow strict typing");
     expect(prompt).toContain("E2E tests for user flows");
     expect(prompt).toContain("Test command: `bun test`");
+
+    rmSync(tmpDir, { recursive: true });
+  });
+});
+
+// =============================================================================
+// appendReviewFeedback — [REQ-01] [REQ-03] [REQ-04] append rejection reasons to task markdown
+// =============================================================================
+
+describe("appendReviewFeedback", () => {
+  test("appends Review Feedback section with Attempt 1 on first failure", () => {
+    const tmpDir = join("/tmp", "bart-feedback-test-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const taskMdPath = join(tmpDir, "task-A1.md");
+    writeFileSync(taskMdPath, "### Task A1\nBuild the API endpoint.\n\n## Definition of Done\n- [ ] Tests pass\n");
+
+    const result = appendReviewFeedback(taskMdPath, ["Missing error handling", "No input validation"]);
+
+    expect(result).toBe(true);
+    const content = readFileSync(taskMdPath, "utf-8");
+    expect(content).toContain("## Review Feedback");
+    expect(content).toContain("### Attempt 1 — REJECTED");
+    expect(content).toContain("- Missing error handling");
+    expect(content).toContain("- No input validation");
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("appends Attempt 2 on second failure, preserving Attempt 1", () => {
+    const tmpDir = join("/tmp", "bart-feedback-test-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const taskMdPath = join(tmpDir, "task-A1.md");
+    writeFileSync(taskMdPath, `### Task A1
+Build the API endpoint.
+
+## Review Feedback
+
+### Attempt 1 — REJECTED
+- Missing error handling
+`);
+
+    const result = appendReviewFeedback(taskMdPath, ["Still no validation", "Tests incomplete"]);
+
+    expect(result).toBe(true);
+    const content = readFileSync(taskMdPath, "utf-8");
+    // Attempt 1 preserved
+    expect(content).toContain("### Attempt 1 — REJECTED");
+    expect(content).toContain("- Missing error handling");
+    // Attempt 2 added
+    expect(content).toContain("### Attempt 2 — REJECTED");
+    expect(content).toContain("- Still no validation");
+    expect(content).toContain("- Tests incomplete");
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("returns false and does not create file when task markdown does not exist", () => {
+    const taskMdPath = join("/tmp", "bart-feedback-test-nonexistent-" + Date.now(), "task-X1.md");
+
+    const result = appendReviewFeedback(taskMdPath, ["Some issue"]);
+
+    expect(result).toBe(false);
+    expect(existsSync(taskMdPath)).toBe(false);
+  });
+
+  test("does not corrupt existing markdown sections", () => {
+    const tmpDir = join("/tmp", "bart-feedback-test-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const taskMdPath = join(tmpDir, "task-B1.md");
+    const originalContent = `### Task B1
+Implementation details.
+
+## Scope
+- Included: API routes
+- Excluded: Database
+
+## Requirements
+- REQ-01
+
+## Definition of Done
+- [ ] All tests pass
+- [ ] Code reviewed
+
+## Tests
+\`\`\`typescript
+test("works", () => { expect(true).toBe(true); });
+\`\`\`
+`;
+    writeFileSync(taskMdPath, originalContent);
+
+    appendReviewFeedback(taskMdPath, ["Fix the bug"]);
+
+    const content = readFileSync(taskMdPath, "utf-8");
+    // All original sections preserved
+    expect(content).toContain("## Scope");
+    expect(content).toContain("- Included: API routes");
+    expect(content).toContain("## Requirements");
+    expect(content).toContain("## Definition of Done");
+    expect(content).toContain("## Tests");
+    // Feedback appended at end
+    expect(content).toContain("## Review Feedback");
+    expect(content).toContain("### Attempt 1 — REJECTED");
+    // Feedback appears after Tests section
+    const testsIdx = content.indexOf("## Tests");
+    const feedbackIdx = content.indexOf("## Review Feedback");
+    expect(feedbackIdx).toBeGreaterThan(testsIdx);
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("feedback is picked up by buildTaskPrompt automatically", () => {
+    const tmpDir = join("/tmp", "bart-feedback-prompt-test-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const tasksPath = join(tmpDir, "tasks.json");
+    const taskMdPath = join(tmpDir, "task-A1.md");
+    writeFileSync(taskMdPath, "### Task A1\nDo the thing.\n");
+
+    appendReviewFeedback(taskMdPath, ["Missing tests"]);
+
+    const task: Task = {
+      id: "A1",
+      workstream: "A",
+      title: "Task A1",
+      description: "Do the thing.",
+      files: ["src/a.ts"],
+      depends_on: [],
+      status: "pending",
+      files_modified: [],
+      started_at: null,
+      completed_at: null,
+      error: null,
+    };
+    const prompt = buildTaskPrompt(task, tasksPath, "", "\n\n## Self-Review\nCheck.");
+
+    expect(prompt).toContain("## Review Feedback");
+    expect(prompt).toContain("### Attempt 1 — REJECTED");
+    expect(prompt).toContain("- Missing tests");
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("correctly counts attempt number from multiple existing subsections", () => {
+    const tmpDir = join("/tmp", "bart-feedback-test-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const taskMdPath = join(tmpDir, "task-A1.md");
+    writeFileSync(taskMdPath, `### Task A1
+Do the thing.
+
+## Review Feedback
+
+### Attempt 1 — REJECTED
+- Issue one
+
+### Attempt 2 — REJECTED
+- Issue two
+`);
+
+    appendReviewFeedback(taskMdPath, ["Issue three"]);
+
+    const content = readFileSync(taskMdPath, "utf-8");
+    expect(content).toContain("### Attempt 3 — REJECTED");
+    expect(content).toContain("- Issue three");
+    // Previous attempts preserved
+    expect(content).toContain("### Attempt 1 — REJECTED");
+    expect(content).toContain("### Attempt 2 — REJECTED");
+
+    rmSync(tmpDir, { recursive: true });
+  });
+});
+
+// =============================================================================
+// markReviewFeedbackResolved — [REQ-02] [REQ-03]
+// =============================================================================
+
+describe("markReviewFeedbackResolved", () => {
+  test("appends ### Resolved when ## Review Feedback section exists", () => {
+    const tmpDir = join("/tmp", "bart-resolved-test-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const taskMdPath = join(tmpDir, "task-A1.md");
+    writeFileSync(taskMdPath, `### Task A1
+Do the thing.
+
+## Review Feedback
+
+### Attempt 1 — REJECTED
+- Missing error handling
+`);
+
+    const result = markReviewFeedbackResolved(taskMdPath);
+
+    expect(result).toBe(true);
+    const content = readFileSync(taskMdPath, "utf-8");
+    expect(content).toContain("### Resolved");
+    expect(content).toContain("All previous review issues have been addressed. Review passed.");
+    // Original feedback preserved as audit trail
+    expect(content).toContain("### Attempt 1 — REJECTED");
+    expect(content).toContain("- Missing error handling");
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("returns false when no ## Review Feedback section exists (no-op)", () => {
+    const tmpDir = join("/tmp", "bart-resolved-test-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const taskMdPath = join(tmpDir, "task-A1.md");
+    writeFileSync(taskMdPath, "### Task A1\nDo the thing.\n");
+
+    const result = markReviewFeedbackResolved(taskMdPath);
+
+    expect(result).toBe(false);
+    const content = readFileSync(taskMdPath, "utf-8");
+    expect(content).not.toContain("### Resolved");
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("returns false when already resolved (idempotent)", () => {
+    const tmpDir = join("/tmp", "bart-resolved-test-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const taskMdPath = join(tmpDir, "task-A1.md");
+    writeFileSync(taskMdPath, `### Task A1
+Do the thing.
+
+## Review Feedback
+
+### Attempt 1 — REJECTED
+- Missing error handling
+
+### Resolved
+All previous review issues have been addressed. Review passed.
+`);
+
+    const result = markReviewFeedbackResolved(taskMdPath);
+
+    expect(result).toBe(false);
+    // Content unchanged — still only one ### Resolved
+    const content = readFileSync(taskMdPath, "utf-8");
+    const resolvedCount = (content.match(/### Resolved/g) || []).length;
+    expect(resolvedCount).toBe(1);
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("returns false when file does not exist", () => {
+    const result = markReviewFeedbackResolved("/tmp/nonexistent-file-" + Date.now() + ".md");
+    expect(result).toBe(false);
+  });
+});
+
+// =============================================================================
+// Integration: buildTaskPrompt picks up resolved feedback from task-{id}.md
+// =============================================================================
+
+describe("buildTaskPrompt with resolved review feedback", () => {
+  test("prompt includes both feedback and resolved marker after round-trip", () => {
+    const tmpDir = join("/tmp", "bart-feedback-resolved-integration-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const tasksPath = join(tmpDir, "tasks.json");
+    const taskMdPath = join(tmpDir, "task-A1.md");
+    writeFileSync(taskMdPath, "### Task A1\nBuild the endpoint.\n");
+
+    // Simulate: first review fails, then passes
+    appendReviewFeedback(taskMdPath, ["Missing validation"]);
+    markReviewFeedbackResolved(taskMdPath);
+
+    const task: Task = {
+      id: "A1",
+      workstream: "A",
+      title: "Task A1",
+      description: "Build the endpoint.",
+      files: ["src/a.ts"],
+      depends_on: [],
+      status: "pending",
+      files_modified: [],
+      started_at: null,
+      completed_at: null,
+      error: null,
+    };
+    const prompt = buildTaskPrompt(task, tasksPath, "", "\n\n## Self-Review\nCheck.");
+
+    // Both feedback and resolved marker visible in agent prompt
+    expect(prompt).toContain("### Attempt 1 — REJECTED");
+    expect(prompt).toContain("- Missing validation");
+    expect(prompt).toContain("### Resolved");
+    expect(prompt).toContain("All previous review issues have been addressed. Review passed.");
 
     rmSync(tmpDir, { recursive: true });
   });
