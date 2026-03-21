@@ -861,6 +861,43 @@ Beta content.
       expect(blocks.get(task.id)!.length).toBeGreaterThan(0);
     }
   });
+
+  test("skips ### headings inside Decisions metadata section", () => {
+    const plan = `# Plan: Test
+
+## Decisions
+
+### Locked
+- Decision one
+
+### Discretionary
+- Decision two
+
+### Deferred
+- Decision three
+
+## Requirements
+- [REQ-01] First requirement
+- [REQ-02] Second requirement
+
+## CI Workflow
+### Update publish job [REQ-01]
+Publish job description.
+Files: .github/workflows/ci.yml
+
+### Add git permissions [REQ-02]
+Git permissions description.
+Files: .github/workflows/ci.yml
+`;
+    const { tasks } = parsePlanToTasks(plan, cwd);
+    expect(tasks.length).toBe(2);
+    const blocks = extractTaskContentBlocks(plan, tasks);
+    expect(blocks.size).toBe(2);
+    expect(blocks.get("A1")).toContain("Publish job description");
+    expect(blocks.get("A1")).not.toContain("Locked");
+    expect(blocks.get("A2")).toContain("Git permissions description");
+    expect(blocks.get("A2")).not.toContain("Discretionary");
+  });
 });
 
 // =============================================================================

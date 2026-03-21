@@ -325,16 +325,22 @@ export function extractTaskContentBlocks(planContent: string, tasks: Task[]): Ma
   const lines = planContent.split("\n");
   const blocks = new Map<string, string>();
 
-  // Find the line index where each ### heading starts (skipping code fences)
+  // Find the line index where each ### heading starts (skipping code fences and metadata sections)
   const taskHeadingIndices: number[] = [];
   let inFence = false;
+  let inMetadata = false;
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (trimmed.startsWith("```")) {
       inFence = !inFence;
       continue;
     }
-    if (!inFence && trimmed.startsWith("### ")) {
+    if (!inFence && trimmed.startsWith("## ") && !trimmed.startsWith("### ")) {
+      const sectionTitle = trimmed.replace(/^#+\s*/, "").trim();
+      inMetadata = /^(Requirements|Testing|Decisions)$/i.test(sectionTitle);
+      continue;
+    }
+    if (!inFence && !inMetadata && trimmed.startsWith("### ")) {
       taskHeadingIndices.push(i);
     }
   }
