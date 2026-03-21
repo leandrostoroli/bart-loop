@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
-import { buildTestingContextBlock, buildSelfReviewBlock, buildTaskPrompt, extractDefinitionOfDone, appendReviewFeedback, markReviewFeedbackResolved } from "./cli.js";
+import { buildTestingContextBlock, buildSelfReviewBlock, buildTaskPrompt, extractDefinitionOfDone, appendReviewFeedback, markReviewFeedbackResolved, resolveTaskFilePath } from "./cli.js";
 import type { Task } from "./constants.js";
 
 // =============================================================================
@@ -801,6 +801,52 @@ All previous review issues have been addressed. Review passed.
   test("returns false when file does not exist", () => {
     const result = markReviewFeedbackResolved("/tmp/nonexistent-file-" + Date.now() + ".md");
     expect(result).toBe(false);
+  });
+});
+
+// =============================================================================
+// resolveTaskFilePath — [REQ-01] resolve task markdown file path for display
+// =============================================================================
+
+describe("resolveTaskFilePath", () => {
+  test("returns absolute path when task markdown file exists", () => {
+    const tmpDir = join("/tmp", "bart-taskfile-test-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const tasksPath = join(tmpDir, "tasks.json");
+    writeFileSync(join(tmpDir, "task-A1.md"), "### Task A1\nContent.");
+
+    const result = resolveTaskFilePath(tasksPath, "A1");
+
+    expect(result).toBe(join(tmpDir, "task-A1.md"));
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("returns '(no task file)' when task markdown file does not exist", () => {
+    const tmpDir = join("/tmp", "bart-taskfile-test-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const tasksPath = join(tmpDir, "tasks.json");
+    // No task-B2.md created
+
+    const result = resolveTaskFilePath(tasksPath, "B2");
+
+    expect(result).toBe("(no task file)");
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("resolves path relative to tasksPath directory, not cwd", () => {
+    const tmpDir = join("/tmp", "bart-taskfile-test-" + Date.now(), "nested", "plan");
+    mkdirSync(tmpDir, { recursive: true });
+    const tasksPath = join(tmpDir, "tasks.json");
+    writeFileSync(join(tmpDir, "task-C1.md"), "### Task C1\nNested.");
+
+    const result = resolveTaskFilePath(tasksPath, "C1");
+
+    expect(result).toBe(join(tmpDir, "task-C1.md"));
+    expect(result).toContain("/nested/plan/task-C1.md");
+
+    rmSync(join("/tmp", "bart-taskfile-test-" + tmpDir.split("bart-taskfile-test-")[1].split("/")[0]), { recursive: true });
   });
 });
 

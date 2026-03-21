@@ -714,6 +714,11 @@ Before marking this task complete, you MUST:
 Only after all ${definitionOfDone ? "four" : "three"} checks pass should you consider this task complete.`;
 }
 
+export function resolveTaskFilePath(tasksPath: string, taskId: string): string {
+  const taskMdPath = join(dirname(tasksPath), `task-${taskId}.md`);
+  return existsSync(taskMdPath) ? taskMdPath : "(no task file)";
+}
+
 /**
  * Build the task prompt for an agent. Checks for a task-{id}.md file in the plan
  * directory (dirname of tasksPath). When found, uses its contents as the primary
@@ -862,7 +867,8 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
   
   console.log(`\n🚀 Starting task: ${taskId} — ${task.title}`);
   console.log(`   Workstream: ${task.workstream}`);
-  console.log(`📁 Working directory: ${projectRoot}\n`);
+  console.log(`📁 Working directory: ${projectRoot}`);
+  console.log(`📄 Task file: ${resolveTaskFilePath(tasksPath, taskId)}\n`);
 
   const tasksData = readTasks(tasksPath);
   const taskIndex = tasksData.tasks.findIndex(t => t.id === taskId);
