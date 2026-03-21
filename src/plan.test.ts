@@ -270,17 +270,15 @@ Files: src/cli.ts, src/cli.test.ts
     expect(tasks[1].files).toContain("src/cli.ts");
     expect(tasks[1].files).toContain("src/cli.test.ts");
 
-    // Requirements coverage — workstream B because ## Requirements and ## Testing
-    // each count as section increments, so ## Core Changes is sectionIndex=3
+    // Requirements coverage — both tasks are in workstream A (## Core Changes)
+    // since metadata sections (Requirements, Testing) are skipped
     const task0Id = tasks[0].id;
     const task1Id = tasks[1].id;
     expect(requirements[0].covered_by).toContain(task0Id);
     expect(requirements[1].covered_by).toContain(task1Id);
   });
 
-  test("## Testing and ## Requirements count toward section index for workstream assignment", () => {
-    // sectionIndex increments for ALL ## headings including Requirements and Testing.
-    // This means metadata sections shift subsequent workstream lettering.
+  test("metadata sections (Requirements, Testing) do not affect workstream lettering", () => {
     const plan = `# Plan
 
 ## Requirements
@@ -302,9 +300,10 @@ Files: src/Dashboard.tsx
     const { tasks } = parsePlanToTasks(plan, cwd);
     expect(tasks.length).toBe(2);
 
-    // Both tasks end up in the same workstream since metadata sections
-    // consume section indices, pushing real workstreams into the same bucket
-    expect(tasks[0].workstream).toBe(tasks[1].workstream);
+    // Metadata sections should NOT affect workstream lettering.
+    // Backend = workstream A, Frontend = workstream B.
+    expect(tasks[0].workstream).toBe("A");
+    expect(tasks[1].workstream).toBe("B");
   });
 
   test("testing metadata coexists with TDD-structured tasks", () => {
@@ -490,6 +489,238 @@ Files: src/feature.ts, src/feature.test.ts
 });
 
 // =============================================================================
+// parsePlanToTasks — multi-workstream task parsing
+// =============================================================================
+
+describe("parsePlanToTasks — multi-workstream task parsing", () => {
+  const cwd = "/tmp/test-project";
+
+  test("parses tasks into separate workstreams with correct IDs", () => {
+    const plan = `# Plan
+
+## Requirements
+- [REQ-01] Build the setup
+- [REQ-02] Build the UI
+
+## Setup
+### Init project [REQ-01]
+Initialize the project structure.
+Files: package.json
+
+### Configure lint [REQ-01]
+Set up linting rules.
+Files: .eslintrc.json
+
+## Build UI
+### Build UI
+Create the interface.
+Files: src/ui.ts
+`;
+    const { tasks } = parsePlanToTasks(plan, cwd);
+    expect(tasks.length).toBe(3);
+    expect(tasks[0].workstream).toBe("A");
+    expect(tasks[0].id).toBe("A1");
+    expect(tasks[1].workstream).toBe("A");
+    expect(tasks[1].id).toBe("A2");
+    expect(tasks[2].workstream).toBe("B");
+    expect(tasks[2].id).toBe("B1");
+  });
+});
+
+// =============================================================================
+// parsePlanToTasks — metadata sections skipped for workstream assignment
+// =============================================================================
+
+describe("parsePlanToTasks — metadata sections skipped for workstream assignment", () => {
+  const cwd = "/tmp/test-project";
+
+  test("metadata sections (Decisions, Requirements) do not affect workstream lettering", () => {
+    const plan = `# Plan
+
+## Decisions
+### Locked
+- Use React for frontend
+
+### Discretionary
+- Team decides on state management
+
+## Requirements
+- [REQ-01] Build the setup
+- [REQ-02] Build the UI
+
+## Setup
+### Init project [REQ-01]
+Initialize the project structure.
+Files: package.json
+
+### Configure lint [REQ-01]
+Set up linting rules.
+Files: .eslintrc.json
+
+## Build UI
+### Build UI
+Create the interface.
+Files: src/ui.ts
+`;
+    const { tasks } = parsePlanToTasks(plan, cwd);
+    expect(tasks.length).toBe(3);
+    expect(tasks[0].workstream).toBe("A");
+    expect(tasks[0].id).toBe("A1");
+    expect(tasks[1].workstream).toBe("A");
+    expect(tasks[1].id).toBe("A2");
+    expect(tasks[2].workstream).toBe("B");
+    expect(tasks[2].id).toBe("B1");
+  });
+
+  test("sequential sections get sequential workstream letters (A, B, C) [REQ-03]", () => {
+    const plan = `# Plan
+
+## Decisions
+### Locked
+- No backward compat needed
+### Deferred
+- Future work
+
+## Requirements
+- [REQ-01] Setup works
+- [REQ-02] API works
+- [REQ-03] UI works
+
+## Testing
+Test command: bun test
+Framework: bun test
+Conventions: *.test.ts
+
+## Setup
+### Initialize project [REQ-01]
+Set up the project.
+Files: src/setup.ts
+
+## API
+### Build endpoints [REQ-02]
+Create REST API.
+Files: src/api.ts
+
+## UI
+### Create dashboard [REQ-03]
+Build the frontend.
+Files: src/Dashboard.tsx
+`;
+    const { tasks } = parsePlanToTasks(plan, cwd);
+    expect(tasks.length).toBe(3);
+    expect(tasks[0].workstream).toBe("A");
+    expect(tasks[1].workstream).toBe("B");
+    expect(tasks[2].workstream).toBe("C");
+  });
+
+  test("plan without metadata sections still assigns workstreams correctly [REQ-04]", () => {
+    const plan = `# Plan
+
+## Backend
+### Build API
+Create REST endpoints.
+Files: src/api.ts
+
+### Add auth
+Add authentication.
+Files: src/auth.ts
+
+## Frontend
+### Build UI
+Create the interface.
+Files: src/ui.ts
+`;
+    const { tasks } = parsePlanToTasks(plan, cwd);
+    expect(tasks.length).toBe(3);
+    expect(tasks[0].workstream).toBe("A");
+    expect(tasks[0].id).toBe("A1");
+    expect(tasks[1].workstream).toBe("A");
+    expect(tasks[1].id).toBe("A2");
+    expect(tasks[2].workstream).toBe("B");
+    expect(tasks[2].id).toBe("B1");
+  });
+});
+
+// =============================================================================
+// parsePlanToTasks — code fences must not be parsed as headings
+// =============================================================================
+
+describe("parsePlanToTasks — code fences ignored", () => {
+  const cwd = "/tmp/test-project";
+
+  test("## and ### headings inside code fences are not parsed as workstreams or tasks", () => {
+    const plan = `# Plan
+
+## Requirements
+- [REQ-01] Feature works
+
+## Testing
+Test command: bun test
+
+## Fix Parser
+### Skip metadata sections [REQ-01]
+Modify the parser.
+
+**Test first:**
+\`\`\`typescript
+test("metadata sections do not affect lettering", () => {
+  const plan = \\\`# Plan
+
+## Requirements
+- [REQ-01] API works
+
+## Backend
+### Build API [REQ-01]
+Create endpoints.
+
+## Frontend
+### Build dashboard
+Create the UI.
+\\\`;
+  const { tasks } = parsePlanToTasks(plan, cwd);
+  expect(tasks.length).toBe(2);
+});
+\`\`\`
+
+Files: src/plan.ts, src/plan.test.ts
+`;
+    const { tasks } = parsePlanToTasks(plan, cwd);
+    // Only one real task: "Skip metadata sections"
+    // The ## and ### inside the code fence should be ignored
+    expect(tasks.length).toBe(1);
+    expect(tasks[0].id).toBe("A1");
+    expect(tasks[0].title).toBe("Skip metadata sections [REQ-01]");
+  });
+
+  test("multiple code fences with headings do not create phantom tasks", () => {
+    const plan = `# Plan
+
+## Work
+### Real task one
+Description.
+
+\`\`\`markdown
+## Fake Section
+### Fake task
+This is inside a code fence.
+\`\`\`
+
+### Real task two
+Another description.
+
+\`\`\`
+## Another fake
+### Another fake task
+\`\`\`
+`;
+    const { tasks } = parsePlanToTasks(plan, cwd);
+    expect(tasks.length).toBe(2);
+    expect(tasks[0].title).toBe("Real task one");
+    expect(tasks[1].title).toBe("Real task two");
+  });
+});
+
+// =============================================================================
 // extractTaskContentBlocks — [REQ-01] content extraction per task
 // =============================================================================
 
@@ -533,7 +764,7 @@ Files: src/other.ts
 `;
     const { tasks } = parsePlanToTasks(plan, cwd);
     const blocks = extractTaskContentBlocks(plan, tasks);
-    // Use actual task IDs from parser (section indices shift workstream lettering)
+    // Use actual task IDs from parser
     const id0 = tasks[0].id;
     const id1 = tasks[1].id;
     expect(blocks.get(id0)).toContain("**Test first:**");

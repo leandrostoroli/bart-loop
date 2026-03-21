@@ -132,8 +132,10 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
   const lines = planContent.split("\n");
   const tasks: Task[] = [];
   const workstreams = ["A", "B", "C", "D", "E", "F"];
-  let currentWorkstreamIndex = 0;
+  let currentWorkstreamIndex = -1;
   let currentWorkstreamTaskNum = 1;
+  let inMetadataSection = false;
+  let inCodeFence = false;
 
   const extractTitle = (line: string) => {
     return line.replace(/^#+\s*/, "").trim();
@@ -160,42 +162,56 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
   let currentSectionName = "";
   const autoReqMap = new Map<string, Requirement>(); // sectionName -> Requirement
 
-  let sectionIndex = 0;
   let sectionTaskCounts: { [key: number]: number } = {};
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
 
-    if (trimmed.startsWith("## ") && !trimmed.startsWith("### ")) {
-      // Skip metadata sections (Requirements, Testing) — not workstream content
-      const sectionTitle = extractTitle(trimmed);
-      if (!sectionTitle.match(/^(Requirements|Testing)$/i)) {
-        currentSectionName = sectionTitle;
+    // Track code fence boundaries — skip all heading detection inside code blocks
+    if (trimmed.startsWith("```")) {
+      inCodeFence = !inCodeFence;
+      continue;
+    }
+    if (inCodeFence) continue;
 
-        if (!isExplicitMode && currentSectionName) {
-          const reqId = "REQ-" + currentSectionName.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/-+$/, "");
-          if (!autoReqMap.has(reqId)) {
-            autoReqMap.set(reqId, {
-              id: reqId,
-              description: currentSectionName,
-              covered_by: [],
-              status: "none"
-            });
-          }
+    if (trimmed.startsWith("## ") && !trimmed.startsWith("### ")) {
+      const sectionTitle = extractTitle(trimmed);
+      // Skip metadata sections (Requirements, Testing, Decisions) — not workstream content
+      if (sectionTitle.match(/^(Requirements|Testing|Decisions)$/i)) {
+        inMetadataSection = true;
+        continue;
+      }
+
+      inMetadataSection = false;
+      currentSectionName = sectionTitle;
+
+      if (!isExplicitMode && currentSectionName) {
+        const reqId = "REQ-" + currentSectionName.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/-+$/, "");
+        if (!autoReqMap.has(reqId)) {
+          autoReqMap.set(reqId, {
+            id: reqId,
+            description: currentSectionName,
+            covered_by: [],
+            status: "none"
+          });
         }
       }
 
-      if (sectionIndex > 0 && sectionIndex % 2 === 0) {
-        currentWorkstreamIndex = Math.min(currentWorkstreamIndex + 1, workstreams.length - 1);
-        currentWorkstreamTaskNum = 1;
-      }
-      sectionIndex++;
-      sectionTaskCounts[sectionIndex] = 0;
+      currentWorkstreamIndex = Math.min(currentWorkstreamIndex + 1, workstreams.length - 1);
+      currentWorkstreamTaskNum = 1;
+      sectionTaskCounts[currentWorkstreamIndex] = 0;
     }
+
+    // Skip ### headings inside metadata sections
+    if (inMetadataSection) continue;
 
     if (trimmed.startsWith("### ")) {
       const taskTitle = extractTitle(trimmed);
+      if (currentWorkstreamIndex < 0) {
+        currentWorkstreamIndex = 0;
+        sectionTaskCounts[0] = 0;
+      }
       const ws = workstreams[currentWorkstreamIndex];
       const taskId = `${ws}${currentWorkstreamTaskNum}`;
 
@@ -231,8 +247,8 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
         files.push(...extractFiles(lines[k]));
       }
 
-      const lastTaskInSection = sectionTaskCounts[sectionIndex] > 0
-        ? `${ws}${sectionTaskCounts[sectionIndex]}`
+      const lastTaskInSection = sectionTaskCounts[currentWorkstreamIndex] > 0
+        ? `${ws}${sectionTaskCounts[currentWorkstreamIndex]}`
         : null;
 
       const hasDependency = taskTitle.toLowerCase().includes("depend") ||
@@ -257,7 +273,7 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
       });
 
       currentWorkstreamTaskNum++;
-      sectionTaskCounts[sectionIndex]++;
+      sectionTaskCounts[currentWorkstreamIndex]++;
     }
   }
 
@@ -309,10 +325,16 @@ export function extractTaskContentBlocks(planContent: string, tasks: Task[]): Ma
   const lines = planContent.split("\n");
   const blocks = new Map<string, string>();
 
-  // Find the line index where each ### heading starts
+  // Find the line index where each ### heading starts (skipping code fences)
   const taskHeadingIndices: number[] = [];
+  let inFence = false;
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim().startsWith("### ")) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence && trimmed.startsWith("### ")) {
       taskHeadingIndices.push(i);
     }
   }
@@ -324,10 +346,15 @@ export function extractTaskContentBlocks(planContent: string, tasks: Task[]): Ma
     const startIdx = taskHeadingIndices[t];
     let endIdx = lines.length;
 
-    // Find end: next ### or ## heading
+    // Find end: next ### or ## heading (skipping code fences)
+    let inFenceEnd = false;
     for (let i = startIdx + 1; i < lines.length; i++) {
       const trimmed = lines[i].trim();
-      if (trimmed.startsWith("### ") || (trimmed.startsWith("## ") && !trimmed.startsWith("### "))) {
+      if (trimmed.startsWith("```")) {
+        inFenceEnd = !inFenceEnd;
+        continue;
+      }
+      if (!inFenceEnd && (trimmed.startsWith("### ") || (trimmed.startsWith("## ") && !trimmed.startsWith("### ")))) {
         endIdx = i;
         break;
       }
