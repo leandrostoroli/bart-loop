@@ -113,6 +113,42 @@ export function countReviewRetriesForTask(entries: HistoryEntry[], taskId: strin
   ).length;
 }
 
+export function findAllReadyTasks(tasks: TasksData, workstream?: string): string[] {
+  const pending = tasks.tasks.filter(t => t.status === "pending");
+  const ready: string[] = [];
+
+  for (const task of pending) {
+    if (workstream && task.workstream !== workstream) {
+      continue;
+    }
+    const deps = task.depends_on || [];
+    const allDepsMet = deps.every(depId => {
+      const dep = tasks.tasks.find(t => t.id === depId);
+      return dep?.status === "completed";
+    });
+    if (allDepsMet) {
+      ready.push(task.id);
+    }
+  }
+
+  return ready;
+}
+
+export function getTasksByStatus(tasks: TasksData, status: Task["status"]): Task[] {
+  return tasks.tasks.filter(t => t.status === status);
+}
+
+export function getProgress(tasks: TasksData): { total: number; completed: number; in_progress: number; pending: number; error: number } {
+  const all = tasks.tasks;
+  return {
+    total: all.length,
+    completed: all.filter(t => t.status === "completed").length,
+    in_progress: all.filter(t => t.status === "in_progress").length,
+    pending: all.filter(t => t.status === "pending").length,
+    error: all.filter(t => t.status === "error").length,
+  };
+}
+
 export function calculateCoverage(tasks: TasksData): Requirement[] {
   if (!tasks.requirements || tasks.requirements.length === 0) return [];
 

@@ -3,6 +3,8 @@ import { join } from "path";
 import { Task, Requirement, TestingMetadata } from "./constants.js";
 import { findFile } from "./tasks.js";
 import { discoverSpecialists, matchSpecialist, loadSpecialistModel } from "./specialists.js";
+import { generateTaskMarkdown } from "./task-gen.js";
+import type { AgentRunner } from "./task-gen.js";
 
 function findLatestPlanInDirs(dirs: string[]): string | undefined {
   let latestPlan: { path: string; mtime: number } | null = null;
@@ -298,7 +300,56 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
   return { tasks, requirements, testing };
 }
 
-export async function runPlanCommand(cwd: string, _tasksPath: string, planPathArg?: string, useLatestPlan?: boolean, autoConfirm?: boolean) {
+/**
+ * Extract the full content block for each task from the plan markdown.
+ * Each block starts at the task's ### heading and ends at the next ### or ## heading.
+ * Returns a Map of taskId -> full content string.
+ */
+export function extractTaskContentBlocks(planContent: string, tasks: Task[]): Map<string, string> {
+  const lines = planContent.split("\n");
+  const blocks = new Map<string, string>();
+
+  // Find the line index where each ### heading starts
+  const taskHeadingIndices: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().startsWith("### ")) {
+      taskHeadingIndices.push(i);
+    }
+  }
+
+  // For each task (by order), extract its content block
+  for (let t = 0; t < tasks.length; t++) {
+    if (t >= taskHeadingIndices.length) break;
+
+    const startIdx = taskHeadingIndices[t];
+    let endIdx = lines.length;
+
+    // Find end: next ### or ## heading
+    for (let i = startIdx + 1; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      if (trimmed.startsWith("### ") || (trimmed.startsWith("## ") && !trimmed.startsWith("### "))) {
+        endIdx = i;
+        break;
+      }
+    }
+
+    const block = lines.slice(startIdx, endIdx).join("\n").trimEnd();
+    blocks.set(tasks[t].id, block);
+  }
+
+  return blocks;
+}
+
+/**
+ * Write each extracted content block to a task-{id}.md file in the plan directory.
+ */
+export function writeTaskMarkdownFiles(planDir: string, blocks: Map<string, string>): void {
+  for (const [taskId, content] of blocks) {
+    writeFileSync(join(planDir, `task-${taskId}.md`), content);
+  }
+}
+
+export async function runPlanCommand(cwd: string, _tasksPath: string, planPathArg?: string, useLatestPlan?: boolean, autoConfirm?: boolean, agentRunner?: AgentRunner) {
   let planPath = planPathArg;
 
   if (!planPath && useLatestPlan) {
@@ -423,6 +474,43 @@ Example plan.md:
   };
 
   writeFileSync(planTasksPath, JSON.stringify(tasksData, null, 2));
+
+  // Extract and write task content blocks to task-{id}.md files
+  const contentBlocks = extractTaskContentBlocks(planContent, tasks);
+
+  if (agentRunner) {
+    // Generate enriched task markdown using the LLM agent runner
+    const enrichedBlocks = new Map<string, string>();
+    for (const task of tasks) {
+      const rawContent = contentBlocks.get(task.id) || "";
+      // Look up specialist premises and test expectations when task has an assigned specialist
+      let specialistPremises: string | undefined;
+      let testExpectations: string[] | undefined;
+      if (task.specialist) {
+        const specialist = specialists.find(s => s.name === task.specialist);
+        if (specialist) {
+          specialistPremises = specialist.premises;
+          testExpectations = specialist.test_expectations;
+        }
+      }
+      const enriched = await generateTaskMarkdown(
+        {
+          taskId: task.id,
+          rawContent,
+          planContent,
+          requirements: task.requirements || [],
+          specialistPremises,
+          testExpectations,
+          testingMeta: testing || undefined,
+        },
+        agentRunner,
+      );
+      enrichedBlocks.set(task.id, enriched);
+    }
+    writeTaskMarkdownFiles(planDir, enrichedBlocks);
+  } else {
+    writeTaskMarkdownFiles(planDir, contentBlocks);
+  }
 
   console.log(`✅ Generated ${tasks.length} tasks in ${planTasksPath}\n`);
 

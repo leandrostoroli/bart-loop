@@ -1,5 +1,7 @@
 import { describe, test, expect } from "bun:test";
-import { parsePlanToTasks } from "./plan.js";
+import { existsSync, readFileSync, mkdirSync, rmSync, writeFileSync, readdirSync } from "fs";
+import { join } from "path";
+import { parsePlanToTasks, extractTaskContentBlocks, writeTaskMarkdownFiles, runPlanCommand } from "./plan.js";
 
 // =============================================================================
 // parsePlanToTasks — ## Testing metadata parsing
@@ -484,5 +486,545 @@ Files: src/feature.ts, src/feature.test.ts
     expect(tasks[1].title).toBe("Add feature with tests");
     expect(tasks[1].files).toContain("src/feature.ts");
     expect(tasks[1].files).toContain("src/feature.test.ts");
+  });
+});
+
+// =============================================================================
+// extractTaskContentBlocks — [REQ-01] content extraction per task
+// =============================================================================
+
+describe("extractTaskContentBlocks", () => {
+  const cwd = "/tmp/test-project";
+
+  test("returns full content for each task between ### headings", () => {
+    const plan = `# Plan: Test
+## Requirements
+- [REQ-01] Do something
+
+## Testing
+Test command: bun test
+Framework: bun test
+Conventions: *.test.ts
+
+## Feature
+### Task one [REQ-01]
+Description of task one.
+
+**Test first:**
+- Create \`src/thing.test.ts\`
+\`\`\`typescript
+test("it works", () => { expect(true).toBe(true); });
+\`\`\`
+- Run: \`bun test src/thing.test.ts\`
+- Expected: FAIL
+
+**Implementation:**
+- Modify \`src/thing.ts\`
+
+**Verify:**
+- Run: \`bun test src/thing.test.ts\`
+- Expected: PASS
+
+Files: src/thing.ts, src/thing.test.ts
+
+### Task two [REQ-01]
+Second task description.
+Files: src/other.ts
+`;
+    const { tasks } = parsePlanToTasks(plan, cwd);
+    const blocks = extractTaskContentBlocks(plan, tasks);
+    // Use actual task IDs from parser (section indices shift workstream lettering)
+    const id0 = tasks[0].id;
+    const id1 = tasks[1].id;
+    expect(blocks.get(id0)).toContain("**Test first:**");
+    expect(blocks.get(id0)).toContain("src/thing.test.ts");
+    expect(blocks.get(id0)).toContain("**Implementation:**");
+    expect(blocks.get(id0)).toContain("**Verify:**");
+    expect(blocks.get(id1)).toContain("Second task description");
+    expect(blocks.get(id1)).not.toContain("Task one");
+  });
+
+  test("handles single task at end of file", () => {
+    const plan = `# Plan
+
+## Work
+### Only task
+This is the only task.
+Files: src/main.ts
+`;
+    const { tasks } = parsePlanToTasks(plan, cwd);
+    const blocks = extractTaskContentBlocks(plan, tasks);
+    expect(blocks.size).toBe(1);
+    expect(blocks.get("A1")).toContain("This is the only task.");
+    expect(blocks.get("A1")).toContain("src/main.ts");
+  });
+
+  test("stops content block at next ## heading", () => {
+    const plan = `# Plan
+
+## First Section
+### Task A
+Content for A.
+
+## Second Section
+### Task B
+Content for B.
+`;
+    const { tasks } = parsePlanToTasks(plan, cwd);
+    const blocks = extractTaskContentBlocks(plan, tasks);
+    expect(blocks.get("A1")).toContain("Content for A.");
+    expect(blocks.get("A1")).not.toContain("Second Section");
+    expect(blocks.get("A1")).not.toContain("Content for B.");
+  });
+
+  test("preserves code fences in content blocks", () => {
+    const plan = `# Plan
+
+## Work
+### Task with code
+Description.
+
+\`\`\`typescript
+function hello() {
+  return "world";
+}
+\`\`\`
+
+Files: src/hello.ts
+`;
+    const { tasks } = parsePlanToTasks(plan, cwd);
+    const blocks = extractTaskContentBlocks(plan, tasks);
+    expect(blocks.get("A1")).toContain("```typescript");
+    expect(blocks.get("A1")).toContain('return "world"');
+    expect(blocks.get("A1")).toContain("```");
+  });
+
+  test("maps blocks to correct task IDs across workstreams", () => {
+    const plan = `# Plan
+
+## Requirements
+- [REQ-01] Feature A
+- [REQ-02] Feature B
+
+## Testing
+Test command: bun test
+
+## Alpha
+### First task [REQ-01]
+Alpha content.
+
+### Second task [REQ-01]
+More alpha content.
+
+## Beta
+### Third task [REQ-02]
+Beta content.
+`;
+    const { tasks } = parsePlanToTasks(plan, cwd);
+    const blocks = extractTaskContentBlocks(plan, tasks);
+    // All tasks should have blocks
+    expect(blocks.size).toBe(tasks.length);
+    // Each block should contain its own content
+    for (const task of tasks) {
+      expect(blocks.has(task.id)).toBe(true);
+      expect(blocks.get(task.id)!.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+// =============================================================================
+// writeTaskMarkdownFiles — [REQ-01] [REQ-02] write task-{id}.md files
+// =============================================================================
+
+describe("writeTaskMarkdownFiles", () => {
+  test("creates task-{id}.md files in the plan directory", () => {
+    const tmpDir = join("/tmp", "bart-test-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const blocks = new Map<string, string>();
+    blocks.set("A1", "### Task one\nDescription\n**Test first:**\n...");
+    blocks.set("A2", "### Task two\nOther content");
+    writeTaskMarkdownFiles(tmpDir, blocks);
+    expect(existsSync(join(tmpDir, "task-A1.md"))).toBe(true);
+    expect(existsSync(join(tmpDir, "task-A2.md"))).toBe(true);
+    expect(readFileSync(join(tmpDir, "task-A1.md"), "utf-8")).toContain("Task one");
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("file content matches the block content", () => {
+    const tmpDir = join("/tmp", "bart-test-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    const content = "### Build feature\nDetailed implementation notes.\n\n**Test first:**\n- Write tests";
+    const blocks = new Map<string, string>();
+    blocks.set("B1", content);
+    writeTaskMarkdownFiles(tmpDir, blocks);
+    const written = readFileSync(join(tmpDir, "task-B1.md"), "utf-8");
+    expect(written).toBe(content);
+    rmSync(tmpDir, { recursive: true });
+  });
+});
+
+// =============================================================================
+// generateTaskMarkdown — [REQ-02] [REQ-03] [REQ-04] [REQ-06] [REQ-07]
+// =============================================================================
+
+import { buildTaskGenPrompt, generateTaskMarkdown } from "./task-gen.js";
+import type { GenerateTaskMarkdownOptions } from "./task-gen.js";
+
+describe("buildTaskGenPrompt", () => {
+  const baseOpts: GenerateTaskMarkdownOptions = {
+    taskId: "A1",
+    rawContent: "### Add user auth [REQ-01]\nImplement JWT-based auth.\nFiles: src/auth.ts",
+    planContent: "# Plan: Auth\n## Requirements\n- [REQ-01] Users can authenticate",
+    requirements: ["REQ-01"],
+    testingMeta: { test_command: "bun test", framework: "bun test", conventions: "*.test.ts" },
+  };
+
+  test("includes raw task content in the prompt", () => {
+    const prompt = buildTaskGenPrompt(baseOpts);
+    expect(prompt).toContain("### Add user auth [REQ-01]");
+    expect(prompt).toContain("Implement JWT-based auth.");
+  });
+
+  test("includes full plan context [REQ-07]", () => {
+    const prompt = buildTaskGenPrompt(baseOpts);
+    expect(prompt).toContain("# Plan: Auth");
+    expect(prompt).toContain("[REQ-01] Users can authenticate");
+  });
+
+  test("includes specialist premises when provided [REQ-03]", () => {
+    const prompt = buildTaskGenPrompt({
+      ...baseOpts,
+      specialistPremises: "Follow security best practices\nUse parameterized queries",
+    });
+    expect(prompt).toContain("Follow security best practices");
+    expect(prompt).toContain("Use parameterized queries");
+  });
+
+  test("includes specialist test expectations when provided [REQ-03]", () => {
+    const prompt = buildTaskGenPrompt({
+      ...baseOpts,
+      testExpectations: ["unit tests for all public functions", "integration tests for API endpoints"],
+    });
+    expect(prompt).toContain("unit tests for all public functions");
+    expect(prompt).toContain("integration tests for API endpoints");
+  });
+
+  test("includes testing metadata [REQ-04]", () => {
+    const prompt = buildTaskGenPrompt(baseOpts);
+    expect(prompt).toContain("bun test");
+    expect(prompt).toContain("*.test.ts");
+  });
+
+  test("includes requirements list [REQ-02]", () => {
+    const prompt = buildTaskGenPrompt({
+      ...baseOpts,
+      requirements: ["REQ-01", "REQ-02"],
+    });
+    expect(prompt).toContain("REQ-01");
+    expect(prompt).toContain("REQ-02");
+  });
+
+  test("instructs LLM to produce required sections [REQ-02] [REQ-06]", () => {
+    const prompt = buildTaskGenPrompt(baseOpts);
+    expect(prompt).toContain("## Scope");
+    expect(prompt).toContain("## Requirements");
+    expect(prompt).toContain("## Definition of Done");
+    expect(prompt).toContain("## Tests");
+  });
+
+  test("instructs LLM to generate tests when plan lacks them [REQ-04]", () => {
+    const prompt = buildTaskGenPrompt({
+      ...baseOpts,
+      rawContent: "### Simple task\nJust do it.\nFiles: src/thing.ts",
+    });
+    // Should instruct generating tests even when raw content has none
+    expect(prompt).toMatch(/generate|write|create|include.*test/i);
+  });
+
+  test("works without optional specialist fields", () => {
+    const prompt = buildTaskGenPrompt({
+      taskId: "B1",
+      rawContent: "### Basic task\nDo something.",
+      planContent: "# Plan\n## Work\n### Basic task",
+      requirements: [],
+    });
+    expect(prompt).toContain("### Basic task");
+    expect(prompt).toContain("# Plan");
+  });
+});
+
+describe("generateTaskMarkdown", () => {
+  test("returns structured markdown with all required sections", async () => {
+    const mockOutput = `## Scope
+Build JWT-based authentication.
+
+## Requirements
+- [REQ-01] Users can authenticate
+
+## Definition of Done
+- [ ] Auth endpoint returns JWT token
+- [ ] Tests pass
+
+## Tests
+\`\`\`typescript
+test("auth endpoint returns token", () => {
+  // test code
+});
+\`\`\``;
+
+    const result = await generateTaskMarkdown(
+      {
+        taskId: "A1",
+        rawContent: "### Add auth\nImplement auth.\nFiles: src/auth.ts",
+        planContent: "# Plan\n## Requirements\n- [REQ-01] Auth",
+        requirements: ["REQ-01"],
+        testingMeta: { test_command: "bun test" },
+      },
+      async () => mockOutput,
+    );
+
+    expect(result).toContain("## Scope");
+    expect(result).toContain("## Requirements");
+    expect(result).toContain("## Definition of Done");
+    expect(result).toContain("## Tests");
+  });
+
+  test("passes constructed prompt to the agent runner", async () => {
+    let capturedPrompt = "";
+    await generateTaskMarkdown(
+      {
+        taskId: "A1",
+        rawContent: "### Task\nContent.",
+        planContent: "# Plan",
+        requirements: ["REQ-01"],
+      },
+      async (prompt) => {
+        capturedPrompt = prompt;
+        return "## Scope\nDone";
+      },
+    );
+
+    expect(capturedPrompt).toContain("### Task");
+    expect(capturedPrompt).toContain("# Plan");
+    expect(capturedPrompt).toContain("REQ-01");
+  });
+
+  test("returns agent output as-is", async () => {
+    const agentOutput = "## Scope\nCustom output\n## Tests\nSome tests";
+    const result = await generateTaskMarkdown(
+      {
+        taskId: "B1",
+        rawContent: "### Task",
+        planContent: "# Plan",
+        requirements: [],
+      },
+      async () => agentOutput,
+    );
+
+    expect(result).toBe(agentOutput);
+  });
+
+  test("includes specialist context in prompt sent to agent [REQ-03]", async () => {
+    let capturedPrompt = "";
+    await generateTaskMarkdown(
+      {
+        taskId: "A1",
+        rawContent: "### Task",
+        planContent: "# Plan",
+        requirements: [],
+        specialistPremises: "Security-first approach",
+        testExpectations: ["E2E tests for auth flow"],
+      },
+      async (prompt) => {
+        capturedPrompt = prompt;
+        return "## Scope\nDone";
+      },
+    );
+
+    expect(capturedPrompt).toContain("Security-first approach");
+    expect(capturedPrompt).toContain("E2E tests for auth flow");
+  });
+});
+
+// =============================================================================
+// runPlanCommand — integration with generateTaskMarkdown [REQ-02] [REQ-03] [REQ-07]
+// =============================================================================
+
+describe("runPlanCommand — task markdown generation integration", () => {
+  test("calls generateTaskMarkdown for each task and writes enriched files [REQ-02]", async () => {
+    const tmpDir = join("/tmp", "bart-plan-integration-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+
+    const planContent = `# Plan: Test Integration
+
+## Requirements
+- [REQ-01] Feature works
+
+## Testing
+Test command: bun test
+Framework: bun test
+
+## Core
+### Build feature [REQ-01]
+Implement the feature.
+Files: src/feature.ts
+
+### Add tests [REQ-01]
+Write test coverage.
+Files: src/feature.test.ts
+`;
+    const planPath = join(tmpDir, "plan.md");
+    writeFileSync(planPath, planContent);
+
+    const generatedContents: string[] = [];
+    const mockRunner = async (prompt: string) => {
+      const enriched = `## Scope\nEnriched content for prompt\n\n## Tests\nGenerated tests`;
+      generatedContents.push(enriched);
+      return enriched;
+    };
+
+    await runPlanCommand(tmpDir, join(tmpDir, "tasks.json"), planPath, false, true, mockRunner);
+
+    // Should have called the runner for each task
+    expect(generatedContents.length).toBe(2);
+
+    // Find the generated plan directory
+    const plansDir = join(tmpDir, ".bart", "plans");
+    const planDirs = readdirSync(plansDir);
+    expect(planDirs.length).toBe(1);
+    const planDir = join(plansDir, planDirs[0]);
+
+    // task-{id}.md files should contain enriched content, not raw content
+    const tasksJson = JSON.parse(readFileSync(join(planDir, "tasks.json"), "utf-8"));
+    const taskIds = tasksJson.tasks.map((t: any) => t.id);
+
+    for (const taskId of taskIds) {
+      const taskFile = join(planDir, `task-${taskId}.md`);
+      expect(existsSync(taskFile)).toBe(true);
+      const content = readFileSync(taskFile, "utf-8");
+      expect(content).toContain("## Scope");
+      expect(content).toContain("Enriched content");
+    }
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("passes specialist premises to generateTaskMarkdown when task has specialist [REQ-03]", async () => {
+    const tmpDir = join("/tmp", "bart-plan-specialist-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+
+    // Create a specialist profile — premises as a single block so parseProfile captures it
+    const specialistDir = join(tmpDir, ".bart", "specialists");
+    mkdirSync(specialistDir, { recursive: true });
+    writeFileSync(join(specialistDir, "security-expert.md"), `---
+name: security-expert
+role: security engineer
+description: Security specialist for auth and crypto
+test_expectations:
+  - unit tests for all auth functions
+  - integration tests for auth flow
+---
+
+Always validate input and use parameterized queries.
+`);
+
+    const planContent = `# Plan: Secure Auth
+
+## Requirements
+- [REQ-01] Auth is secure
+
+## Core
+### Build secure auth [REQ-01] [security-expert]
+Implement secure authentication.
+Files: src/auth.ts
+`;
+    const planPath = join(tmpDir, "plan.md");
+    writeFileSync(planPath, planContent);
+
+    const capturedPrompts: string[] = [];
+    const mockRunner = async (prompt: string) => {
+      capturedPrompts.push(prompt);
+      return "## Scope\nSecure auth\n\n## Tests\nAuth tests";
+    };
+
+    await runPlanCommand(tmpDir, join(tmpDir, "tasks.json"), planPath, false, true, mockRunner);
+
+    expect(capturedPrompts.length).toBe(1);
+    // The prompt should include specialist premises
+    expect(capturedPrompts[0]).toContain("Always validate input and use parameterized queries");
+    // The prompt should include specialist test expectations
+    expect(capturedPrompts[0]).toContain("unit tests for all auth functions");
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("writes raw content blocks when no agentRunner is provided", async () => {
+    const tmpDir = join("/tmp", "bart-plan-no-runner-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+
+    const planContent = `# Plan: Simple
+
+## Work
+### Simple task
+Do something simple.
+Files: src/simple.ts
+`;
+    const planPath = join(tmpDir, "plan.md");
+    writeFileSync(planPath, planContent);
+
+    // No agentRunner provided — should fall back to writing raw content blocks
+    await runPlanCommand(tmpDir, join(tmpDir, "tasks.json"), planPath, false, true);
+
+    const plansDir = join(tmpDir, ".bart", "plans");
+    const planDirs = readdirSync(plansDir);
+    const planDir = join(plansDir, planDirs[0]);
+
+    // task file should exist with raw content (no enrichment)
+    const taskFile = join(planDir, "task-A1.md");
+    expect(existsSync(taskFile)).toBe(true);
+    const content = readFileSync(taskFile, "utf-8");
+    expect(content).toContain("### Simple task");
+    expect(content).toContain("Do something simple");
+
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("passes full plan content and testing metadata to generateTaskMarkdown [REQ-07]", async () => {
+    const tmpDir = join("/tmp", "bart-plan-context-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+
+    const planContent = `# Plan: Full Context
+
+## Requirements
+- [REQ-01] Full context passed
+
+## Testing
+Test command: bun test
+Framework: vitest
+Conventions: *.test.ts
+
+## Work
+### Implement feature [REQ-01]
+Build the feature.
+Files: src/feature.ts
+`;
+    const planPath = join(tmpDir, "plan.md");
+    writeFileSync(planPath, planContent);
+
+    let capturedPrompt = "";
+    const mockRunner = async (prompt: string) => {
+      capturedPrompt = prompt;
+      return "## Scope\nDone";
+    };
+
+    await runPlanCommand(tmpDir, join(tmpDir, "tasks.json"), planPath, false, true, mockRunner);
+
+    // Full plan content should be in the prompt
+    expect(capturedPrompt).toContain("# Plan: Full Context");
+    expect(capturedPrompt).toContain("[REQ-01] Full context passed");
+    // Testing metadata should be in the prompt
+    expect(capturedPrompt).toContain("bun test");
+    expect(capturedPrompt).toContain("vitest");
+    expect(capturedPrompt).toContain("*.test.ts");
   });
 });

@@ -629,15 +629,46 @@ export function buildTestingContextBlock(testingMeta: import("./constants.js").T
 }
 
 /**
+ * Extract the "## Definition of Done" section content from task markdown.
+ * Returns the section body (without the heading) or null if not found.
+ */
+export function extractDefinitionOfDone(markdown: string): string | null {
+  const lines = markdown.split("\n");
+  let startIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === "## Definition of Done") {
+      startIdx = i + 1;
+      continue;
+    }
+    if (startIdx !== -1 && /^## /.test(lines[i])) {
+      // Hit the next ## section — extract what we have
+      const content = lines.slice(startIdx, i).join("\n").trim();
+      return content || null;
+    }
+  }
+
+  if (startIdx !== -1) {
+    // DoD was the last section in the file
+    const content = lines.slice(startIdx).join("\n").trim();
+    return content || null;
+  }
+
+  return null;
+}
+
+/**
  * Build the self-review block appended to every task prompt.
  * Includes scope check, code quality check, TDD protocol, and evidence requirement.
+ * When definitionOfDone is provided, injects it as a task-specific completion checklist.
  */
 export function buildSelfReviewBlock(options: {
   specialistPremises?: string;
   specialistTestExpectations?: string[];
   testingContextBlock: string;
+  definitionOfDone?: string | null;
 }): string {
-  const { specialistPremises, specialistTestExpectations, testingContextBlock } = options;
+  const { specialistPremises, specialistTestExpectations, testingContextBlock, definitionOfDone } = options;
   const defaultQualityGate = DEFAULT_QUALITY_GATE.map(s => `\n- ${s}`).join("");
 
   return `
@@ -668,14 +699,84 @@ You MUST follow this sequence for every change:
 ${specialistTestExpectations && specialistTestExpectations.length > 0
 ? `\nSpecialist test expectations:${specialistTestExpectations.map(e => `\n- ${e}`).join("")}`
 : ""}
-${testingContextBlock}
+${testingContextBlock}${definitionOfDone ? `
+### 4. Task-Specific Definition of Done
+
+Verify each item before marking this task complete:
+${definitionOfDone}
+` : ""}
 ### Evidence Requirement
 Before marking this task complete, you MUST:
 - Show actual test command output (not assumptions)
 - All tests must pass with zero failures
 - If you cannot run tests, explain why and flag for review
 
-Only after all three checks pass should you consider this task complete.`;
+Only after all ${definitionOfDone ? "four" : "three"} checks pass should you consider this task complete.`;
+}
+
+/**
+ * Build the task prompt for an agent. Checks for a task-{id}.md file in the plan
+ * directory (dirname of tasksPath). When found, uses its contents as the primary
+ * task context. Falls back to title+description from tasks.json when not found.
+ */
+export function buildTaskPrompt(
+  task: import("./constants.js").Task,
+  tasksPath: string,
+  specialistContext: string,
+  selfReviewBlock: string,
+): string {
+  const planDir = dirname(tasksPath);
+  const taskMdPath = join(planDir, `task-${task.id}.md`);
+
+  if (existsSync(taskMdPath)) {
+    const markdownContent = readFileSync(taskMdPath, "utf-8");
+    return `${markdownContent}${specialistContext}
+
+Please complete this task.${selfReviewBlock}`;
+  }
+
+  return `Task: ${task.title}
+Description: ${task.description}
+Files to work on: ${task.files.join(", ")}${specialistContext}
+
+Please complete this task.${selfReviewBlock}`;
+}
+
+/**
+ * Assemble the full task prompt with DoD extraction from task markdown.
+ * This encapsulates the prompt-assembly logic used by runAgent, making it testable.
+ * Reads the task markdown file (if present), extracts Definition of Done,
+ * and wires it into the self-review block.
+ */
+export function assembleTaskPrompt(options: {
+  task: import("./constants.js").Task;
+  tasksPath: string;
+  specialistContext: string;
+  specialistPremises: string;
+  specialistTestExpectations?: string[];
+  testingMetadata?: import("./constants.js").TestingMetadata | null;
+}): string {
+  const { task, tasksPath, specialistContext, specialistPremises, specialistTestExpectations, testingMetadata } = options;
+
+  const testingContextBlock = buildTestingContextBlock(testingMetadata);
+
+  // Extract Definition of Done from task markdown if it exists
+  const planDir = dirname(tasksPath);
+  const taskMdPath = join(planDir, `task-${task.id}.md`);
+  let definitionOfDone: string | null = null;
+  if (existsSync(taskMdPath)) {
+    const taskMarkdown = readFileSync(taskMdPath, "utf-8");
+    definitionOfDone = extractDefinitionOfDone(taskMarkdown);
+  }
+
+  const selfReviewBlock = buildSelfReviewBlock({
+    specialistPremises,
+    specialistTestExpectations,
+    testingContextBlock,
+    definitionOfDone,
+  });
+
+  return buildTaskPrompt(task, tasksPath, specialistContext, selfReviewBlock);
 }
 
 export async function runAgent(taskId: string, tasksPath: string, agentOverride?: string, autoContinue?: boolean, firedMilestones?: Set<number>) {
@@ -746,19 +847,15 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
     }
   }
 
-  // Build testing context and self-review blocks
-  const testingContextBlock = buildTestingContextBlock(tasksData.testing);
-  const selfReviewBlock = buildSelfReviewBlock({
+  // Assemble the full task prompt with DoD extraction from task markdown
+  const taskPrompt = assembleTaskPrompt({
+    task,
+    tasksPath,
+    specialistContext,
     specialistPremises,
     specialistTestExpectations,
-    testingContextBlock,
+    testingMetadata: tasksData.testing,
   });
-
-  const taskPrompt = `Task: ${task.title}
-Description: ${task.description}
-Files to work on: ${task.files.join(", ")}${specialistContext}
-
-Please complete this task.${selfReviewBlock}`;
   
   const args = [...agentConfig.args, taskPrompt];
 
