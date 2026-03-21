@@ -12,22 +12,33 @@ const RED = "\x1b[31m";
 
 function statusColor(status: string): string {
   switch (status) {
-    case "completed": return GREEN;
-    case "in_progress": return YELLOW;
-    case "error": return RED;
-    case "needs_escalation": return RED;
-    default: return DIM;
+    case "completed":
+      return GREEN;
+    case "in_progress":
+      return YELLOW;
+    case "error":
+      return RED;
+    case "needs_escalation":
+      return RED;
+    default:
+      return DIM;
   }
 }
 
 function statusIcon(status: string): string {
   switch (status) {
-    case "completed": return "\u2713";   // ✓
-    case "in_progress": return "\u25D0"; // ◐
-    case "error": return "\u2717";       // ✗
-    case "needs_escalation": return "\u26A0"; // ⚠
-    case "pending": return "\u25CB";     // ○
-    default: return "?";
+    case "completed":
+      return "\u2713"; // ✓
+    case "in_progress":
+      return "\u25D0"; // ◐
+    case "error":
+      return "\u2717"; // ✗
+    case "needs_escalation":
+      return "\u26A0"; // ⚠
+    case "pending":
+      return "\u25CB"; // ○
+    default:
+      return "?";
   }
 }
 
@@ -46,14 +57,18 @@ function formatDuration(start: string | null, end: string | null): string {
 
 function renderDashboard(tasks: TasksData): string {
   const lines: string[] = [];
-  const workstreams = [...new Set(tasks.tasks.map(t => t.workstream))].sort();
+  const workstreams = [...new Set(tasks.tasks.map((t) => t.workstream))].sort();
 
   const total = tasks.tasks.length;
-  const completed = tasks.tasks.filter(t => t.status === "completed").length;
-  const inProgress = tasks.tasks.filter(t => t.status === "in_progress").length;
-  const errorCount = tasks.tasks.filter(t => t.status === "error").length;
-  const escalatedCount = tasks.tasks.filter(t => t.status === "needs_escalation").length;
-  const pending = tasks.tasks.filter(t => t.status === "pending").length;
+  const completed = tasks.tasks.filter((t) => t.status === "completed").length;
+  const inProgress = tasks.tasks.filter(
+    (t) => t.status === "in_progress",
+  ).length;
+  const errorCount = tasks.tasks.filter((t) => t.status === "error").length;
+  const escalatedCount = tasks.tasks.filter(
+    (t) => t.status === "needs_escalation",
+  ).length;
+  const pending = tasks.tasks.filter((t) => t.status === "pending").length;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   const barLen = 30;
@@ -65,26 +80,29 @@ function renderDashboard(tasks: TasksData): string {
   const dashExtras = [
     errorCount > 0 ? `${RED}${errorCount} failed${R}` : "",
     escalatedCount > 0 ? `${RED}${escalatedCount} escalated${R}` : "",
-  ].filter(Boolean).map(s => ` \u2022 ${s}`).join("");
+  ]
+    .filter(Boolean)
+    .map((s) => ` \u2022 ${s}`)
+    .join("");
 
   lines.push(BART.trim());
   lines.push(
     `  [${bar}] ${BOLD}${pct}%${R}  ` +
-    `${GREEN}${completed} done${R} \u2022 ` +
-    `${YELLOW}${inProgress} active${R} \u2022 ` +
-    `${pending} pending` +
-    dashExtras +
-    ` (${total} total)`
+      `${GREEN}${completed} done${R} \u2022 ` +
+      `${YELLOW}${inProgress} active${R} \u2022 ` +
+      `${pending} pending` +
+      dashExtras +
+      ` (${total} total)`,
   );
   lines.push("");
   lines.push(
-    `  ${DIM}${new Date().toLocaleTimeString()}  auto-refresh 2s  Ctrl+C to exit${R}`
+    `  ${DIM}${new Date().toLocaleTimeString()}  auto-refresh 2s  Ctrl+C to exit${R}`,
   );
   lines.push("");
 
   for (const ws of workstreams) {
-    const wsTasks = tasks.tasks.filter(t => t.workstream === ws);
-    const wsCompleted = wsTasks.filter(t => t.status === "completed").length;
+    const wsTasks = tasks.tasks.filter((t) => t.workstream === ws);
+    const wsCompleted = wsTasks.filter((t) => t.status === "completed").length;
     const wsTotal = wsTasks.length;
     const wsPct = wsTotal > 0 ? Math.round((wsCompleted / wsTotal) * 100) : 0;
     const wsFilled = Math.round((wsPct / 100) * 12);
@@ -93,7 +111,7 @@ function renderDashboard(tasks: TasksData): string {
       `${DIM}${"░".repeat(12 - wsFilled)}${R}`;
 
     lines.push(
-      `${BOLD}Workstream ${ws}${R}  [${wsBar}] ${wsPct}% (${wsCompleted}/${wsTotal})`
+      `${BOLD}Workstream ${ws}${R}  [${wsBar}] ${wsPct}% (${wsCompleted}/${wsTotal})`,
     );
 
     for (const task of wsTasks) {
@@ -103,8 +121,7 @@ function renderDashboard(tasks: TasksData): string {
       const duration = task.started_at
         ? formatDuration(task.started_at, task.completed_at)
         : "";
-      const deps =
-        task.depends_on.length > 0 ? task.depends_on.join(",") : "";
+      const deps = task.depends_on.length > 0 ? task.depends_on.join(",") : "";
 
       let line = `  ${color}${icon}${R} ${task.id}: ${task.title}`;
       if (task.specialist) line += ` ${DIM}[${task.specialist}]${R}`;
@@ -112,7 +129,10 @@ function renderDashboard(tasks: TasksData): string {
       if (blocked && deps) line += ` ${YELLOW}[needs ${deps}]${R}`;
       lines.push(line);
 
-      if ((task.status === "error" || task.status === "needs_escalation") && task.error) {
+      if (
+        (task.status === "error" || task.status === "needs_escalation") &&
+        task.error
+      ) {
         lines.push(`      ${RED}${task.error.substring(0, 80)}${R}`);
       }
     }
@@ -149,7 +169,9 @@ export async function runDashboard(tasksPath: string): Promise<void> {
       process.stdout.write("\x1b[?25h\n"); // show cursor
       clearInterval(interval);
       for (const f of watchedFiles) {
-        try { unwatchFile(f); } catch {}
+        try {
+          unwatchFile(f);
+        } catch {}
       }
       resolve();
     };

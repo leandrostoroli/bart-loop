@@ -1,7 +1,19 @@
 import { describe, test, expect } from "bun:test";
-import { existsSync, readFileSync, mkdirSync, rmSync, writeFileSync, readdirSync } from "fs";
+import {
+  existsSync,
+  readFileSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  readdirSync,
+} from "fs";
 import { join } from "path";
-import { parsePlanToTasks, extractTaskContentBlocks, writeTaskMarkdownFiles, runPlanCommand } from "./plan.js";
+import {
+  parsePlanToTasks,
+  extractTaskContentBlocks,
+  writeTaskMarkdownFiles,
+  runPlanCommand,
+} from "./plan.js";
 
 // =============================================================================
 // parsePlanToTasks — ## Testing metadata parsing
@@ -30,7 +42,9 @@ Files: src/feature.ts
     expect(testing).not.toBeNull();
     expect(testing!.test_command).toBe("npm test");
     expect(testing!.framework).toBe("vitest");
-    expect(testing!.conventions).toBe("tests live in __tests__/ directories, named *.test.ts");
+    expect(testing!.conventions).toBe(
+      "tests live in __tests__/ directories, named *.test.ts",
+    );
   });
 
   test("parses ## Testing with only test command", () => {
@@ -104,7 +118,7 @@ Build the main feature.
     const { requirements, testing } = parsePlanToTasks(plan, cwd);
     expect(testing).not.toBeNull();
     // Requirements should be auto-generated from Setup and Features, not Testing
-    const reqIds = requirements.map(r => r.id);
+    const reqIds = requirements.map((r) => r.id);
     expect(reqIds).not.toContain("REQ-TESTING");
     expect(reqIds).toContain("REQ-SETUP");
     expect(reqIds).toContain("REQ-FEATURES");
@@ -333,7 +347,9 @@ Files: src/endpoint.py, tests/test_endpoint.py
     expect(testing).not.toBeNull();
     expect(testing!.test_command).toBe("pytest");
     expect(testing!.framework).toBe("pytest");
-    expect(testing!.conventions).toBe("tests in tests/ directory, named test_*.py");
+    expect(testing!.conventions).toBe(
+      "tests in tests/ directory, named test_*.py",
+    );
 
     // Task has both requirements
     expect(tasks[0].requirements).toContain("REQ-01");
@@ -386,7 +402,9 @@ Files: src/providers/QueryProvider.tsx, __tests__/providers/QueryProvider.test.t
     expect(testing).not.toBeNull();
     expect(testing!.test_command).toBe("npm test");
     expect(testing!.framework).toBe("vitest");
-    expect(testing!.conventions).toBe("tests in __tests__/ directories, named *.test.ts");
+    expect(testing!.conventions).toBe(
+      "tests in __tests__/ directories, named *.test.ts",
+    );
 
     // Requirements parsed
     expect(requirements.length).toBe(3);
@@ -914,14 +932,17 @@ describe("writeTaskMarkdownFiles", () => {
     writeTaskMarkdownFiles(tmpDir, blocks);
     expect(existsSync(join(tmpDir, "task-A1.md"))).toBe(true);
     expect(existsSync(join(tmpDir, "task-A2.md"))).toBe(true);
-    expect(readFileSync(join(tmpDir, "task-A1.md"), "utf-8")).toContain("Task one");
+    expect(readFileSync(join(tmpDir, "task-A1.md"), "utf-8")).toContain(
+      "Task one",
+    );
     rmSync(tmpDir, { recursive: true });
   });
 
   test("file content matches the block content", () => {
     const tmpDir = join("/tmp", "bart-test-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
-    const content = "### Build feature\nDetailed implementation notes.\n\n**Test first:**\n- Write tests";
+    const content =
+      "### Build feature\nDetailed implementation notes.\n\n**Test first:**\n- Write tests";
     const blocks = new Map<string, string>();
     blocks.set("B1", content);
     writeTaskMarkdownFiles(tmpDir, blocks);
@@ -941,10 +962,16 @@ import type { GenerateTaskMarkdownOptions } from "./task-gen.js";
 describe("buildTaskGenPrompt", () => {
   const baseOpts: GenerateTaskMarkdownOptions = {
     taskId: "A1",
-    rawContent: "### Add user auth [REQ-01]\nImplement JWT-based auth.\nFiles: src/auth.ts",
-    planContent: "# Plan: Auth\n## Requirements\n- [REQ-01] Users can authenticate",
+    rawContent:
+      "### Add user auth [REQ-01]\nImplement JWT-based auth.\nFiles: src/auth.ts",
+    planContent:
+      "# Plan: Auth\n## Requirements\n- [REQ-01] Users can authenticate",
     requirements: ["REQ-01"],
-    testingMeta: { test_command: "bun test", framework: "bun test", conventions: "*.test.ts" },
+    testingMeta: {
+      test_command: "bun test",
+      framework: "bun test",
+      conventions: "*.test.ts",
+    },
   };
 
   test("includes raw task content in the prompt", () => {
@@ -962,7 +989,8 @@ describe("buildTaskGenPrompt", () => {
   test("includes specialist premises when provided [REQ-03]", () => {
     const prompt = buildTaskGenPrompt({
       ...baseOpts,
-      specialistPremises: "Follow security best practices\nUse parameterized queries",
+      specialistPremises:
+        "Follow security best practices\nUse parameterized queries",
     });
     expect(prompt).toContain("Follow security best practices");
     expect(prompt).toContain("Use parameterized queries");
@@ -971,7 +999,10 @@ describe("buildTaskGenPrompt", () => {
   test("includes specialist test expectations when provided [REQ-03]", () => {
     const prompt = buildTaskGenPrompt({
       ...baseOpts,
-      testExpectations: ["unit tests for all public functions", "integration tests for API endpoints"],
+      testExpectations: [
+        "unit tests for all public functions",
+        "integration tests for API endpoints",
+      ],
     });
     expect(prompt).toContain("unit tests for all public functions");
     expect(prompt).toContain("integration tests for API endpoints");
@@ -1151,7 +1182,14 @@ Files: src/feature.test.ts
       return enriched;
     };
 
-    await runPlanCommand(tmpDir, join(tmpDir, "tasks.json"), planPath, false, true, mockRunner);
+    await runPlanCommand(
+      tmpDir,
+      join(tmpDir, "tasks.json"),
+      planPath,
+      false,
+      true,
+      mockRunner,
+    );
 
     // Should have called the runner for each task
     expect(generatedContents.length).toBe(2);
@@ -1163,7 +1201,9 @@ Files: src/feature.test.ts
     const planDir = join(plansDir, planDirs[0]);
 
     // task-{id}.md files should contain enriched content, not raw content
-    const tasksJson = JSON.parse(readFileSync(join(planDir, "tasks.json"), "utf-8"));
+    const tasksJson = JSON.parse(
+      readFileSync(join(planDir, "tasks.json"), "utf-8"),
+    );
     const taskIds = tasksJson.tasks.map((t: any) => t.id);
 
     for (const taskId of taskIds) {
@@ -1184,7 +1224,9 @@ Files: src/feature.test.ts
     // Create a specialist profile — premises as a single block so parseProfile captures it
     const specialistDir = join(tmpDir, ".bart", "specialists");
     mkdirSync(specialistDir, { recursive: true });
-    writeFileSync(join(specialistDir, "security-expert.md"), `---
+    writeFileSync(
+      join(specialistDir, "security-expert.md"),
+      `---
 name: security-expert
 role: security engineer
 description: Security specialist for auth and crypto
@@ -1194,7 +1236,8 @@ test_expectations:
 ---
 
 Always validate input and use parameterized queries.
-`);
+`,
+    );
 
     const planContent = `# Plan: Secure Auth
 
@@ -1215,11 +1258,20 @@ Files: src/auth.ts
       return "## Scope\nSecure auth\n\n## Tests\nAuth tests";
     };
 
-    await runPlanCommand(tmpDir, join(tmpDir, "tasks.json"), planPath, false, true, mockRunner);
+    await runPlanCommand(
+      tmpDir,
+      join(tmpDir, "tasks.json"),
+      planPath,
+      false,
+      true,
+      mockRunner,
+    );
 
     expect(capturedPrompts.length).toBe(1);
     // The prompt should include specialist premises
-    expect(capturedPrompts[0]).toContain("Always validate input and use parameterized queries");
+    expect(capturedPrompts[0]).toContain(
+      "Always validate input and use parameterized queries",
+    );
     // The prompt should include specialist test expectations
     expect(capturedPrompts[0]).toContain("unit tests for all auth functions");
 
@@ -1241,7 +1293,13 @@ Files: src/simple.ts
     writeFileSync(planPath, planContent);
 
     // No agentRunner provided — should fall back to writing raw content blocks
-    await runPlanCommand(tmpDir, join(tmpDir, "tasks.json"), planPath, false, true);
+    await runPlanCommand(
+      tmpDir,
+      join(tmpDir, "tasks.json"),
+      planPath,
+      false,
+      true,
+    );
 
     const plansDir = join(tmpDir, ".bart", "plans");
     const planDirs = readdirSync(plansDir);
@@ -1285,7 +1343,14 @@ Files: src/feature.ts
       return "## Scope\nDone";
     };
 
-    await runPlanCommand(tmpDir, join(tmpDir, "tasks.json"), planPath, false, true, mockRunner);
+    await runPlanCommand(
+      tmpDir,
+      join(tmpDir, "tasks.json"),
+      planPath,
+      false,
+      true,
+      mockRunner,
+    );
 
     // Full plan content should be in the prompt
     expect(capturedPrompt).toContain("# Plan: Full Context");

@@ -3,9 +3,9 @@ import { join } from "path";
 
 export interface Standard {
   name: string;
-  description: string;  // First line of text
-  text: string;         // Full text body
-  category: string;     // Parent ## heading
+  description: string; // First line of text
+  text: string; // Full text body
+  category: string; // Parent ## heading
 }
 
 export class StandardsFileError extends Error {
@@ -105,11 +105,14 @@ export function loadStandards(cwd: string): Standard[] {
  * Resolve specific standard names to their full Standard objects.
  * Returns only standards that match the given names.
  */
-export function resolveStandards(names: string[] | undefined, cwd: string): Standard[] {
+export function resolveStandards(
+  names: string[] | undefined,
+  cwd: string,
+): Standard[] {
   if (!names || names.length === 0) return [];
   const all = loadStandards(cwd);
   return names
-    .map(name => all.find(s => s.name === name))
+    .map((name) => all.find((s) => s.name === name))
     .filter((s): s is Standard => s !== undefined);
 }
 
@@ -122,18 +125,22 @@ export function printStandards(cwd: string, nameFilter?: string): void {
 
   if (all.length === 0) {
     console.log("No standards found.");
-    console.log("  Add standards to .bart/standards.md (project) or ~/.bart/standards.md (global).");
+    console.log(
+      "  Add standards to .bart/standards.md (project) or ~/.bart/standards.md (global).",
+    );
     return;
   }
 
   if (nameFilter) {
-    const match = all.find(s => s.name === nameFilter);
+    const match = all.find((s) => s.name === nameFilter);
     if (!match) {
       console.error(`Standard "${nameFilter}" not found.`);
-      console.log(`  Available: ${all.map(s => s.name).join(", ")}`);
+      console.log(`  Available: ${all.map((s) => s.name).join(", ")}`);
       process.exit(1);
     }
-    console.log(`\n### ${match.name}  [${match.category || "uncategorized"}]\n`);
+    console.log(
+      `\n### ${match.name}  [${match.category || "uncategorized"}]\n`,
+    );
     console.log(match.text);
     console.log("");
     return;

@@ -1,6 +1,12 @@
 import { readFileSync, existsSync, readdirSync, statSync } from "fs";
 import { join, dirname } from "path";
-import { Task, TasksData, Requirement, BART_DIR, HistoryEntry } from "./constants.js";
+import {
+  Task,
+  TasksData,
+  Requirement,
+  BART_DIR,
+  HistoryEntry,
+} from "./constants.js";
 
 export function findFile(name: string, startDir: string): string | null {
   let dir = startDir;
@@ -25,21 +31,28 @@ export function readTasks(path: string): TasksData {
   return JSON.parse(content);
 }
 
-export function getTaskField(tasks: TasksData, taskId: string, field: keyof Task): any {
-  const task = tasks.tasks.find(t => t.id === taskId);
+export function getTaskField(
+  tasks: TasksData,
+  taskId: string,
+  field: keyof Task,
+): any {
+  const task = tasks.tasks.find((t) => t.id === taskId);
   return task?.[field] ?? null;
 }
 
-export function findNextTask(tasks: TasksData, workstream?: string): string | null {
-  const pending = tasks.tasks.filter(t => t.status === "pending");
-  
+export function findNextTask(
+  tasks: TasksData,
+  workstream?: string,
+): string | null {
+  const pending = tasks.tasks.filter((t) => t.status === "pending");
+
   for (const task of pending) {
     if (workstream && task.workstream !== workstream) {
       continue;
     }
     const deps = task.depends_on || [];
-    const allDepsMet = deps.every(depId => {
-      const dep = tasks.tasks.find(t => t.id === depId);
+    const allDepsMet = deps.every((depId) => {
+      const dep = tasks.tasks.find((t) => t.id === depId);
       return dep?.status === "completed";
     });
     if (allDepsMet) {
@@ -50,17 +63,20 @@ export function findNextTask(tasks: TasksData, workstream?: string): string | nu
 }
 
 export function depsMet(tasks: TasksData, taskId: string): boolean {
-  const task = tasks.tasks.find(t => t.id === taskId);
+  const task = tasks.tasks.find((t) => t.id === taskId);
   if (!task) return false;
   const deps = task.depends_on || [];
-  return deps.every(depId => {
-    const dep = tasks.tasks.find(t => t.id === depId);
+  return deps.every((depId) => {
+    const dep = tasks.tasks.find((t) => t.id === depId);
     return dep?.status === "completed";
   });
 }
 
-export function getTaskById(tasks: TasksData, taskId: string): Task | undefined {
-  return tasks.tasks.find(t => t.id === taskId);
+export function getTaskById(
+  tasks: TasksData,
+  taskId: string,
+): Task | undefined {
+  return tasks.tasks.find((t) => t.id === taskId);
 }
 
 /**
@@ -105,16 +121,24 @@ export function resolvePlanTasksPath(cwd: string, planSlug?: string): string {
  * Count how many times a specific task was reset due to review failure.
  * Looks at review_fail events that list this task in their tasks_reset array.
  */
-export function countReviewRetriesForTask(entries: HistoryEntry[], taskId: string, planSlug: string): number {
+export function countReviewRetriesForTask(
+  entries: HistoryEntry[],
+  taskId: string,
+  planSlug: string,
+): number {
   return entries.filter(
-    e => e.event === "review_fail"
-      && e.plan_slug === planSlug
-      && e.tasks_reset?.includes(taskId)
+    (e) =>
+      e.event === "review_fail" &&
+      e.plan_slug === planSlug &&
+      e.tasks_reset?.includes(taskId),
   ).length;
 }
 
-export function findAllReadyTasks(tasks: TasksData, workstream?: string): string[] {
-  const pending = tasks.tasks.filter(t => t.status === "pending");
+export function findAllReadyTasks(
+  tasks: TasksData,
+  workstream?: string,
+): string[] {
+  const pending = tasks.tasks.filter((t) => t.status === "pending");
   const ready: string[] = [];
 
   for (const task of pending) {
@@ -122,8 +146,8 @@ export function findAllReadyTasks(tasks: TasksData, workstream?: string): string
       continue;
     }
     const deps = task.depends_on || [];
-    const allDepsMet = deps.every(depId => {
-      const dep = tasks.tasks.find(t => t.id === depId);
+    const allDepsMet = deps.every((depId) => {
+      const dep = tasks.tasks.find((t) => t.id === depId);
       return dep?.status === "completed";
     });
     if (allDepsMet) {
@@ -134,30 +158,41 @@ export function findAllReadyTasks(tasks: TasksData, workstream?: string): string
   return ready;
 }
 
-export function getTasksByStatus(tasks: TasksData, status: Task["status"]): Task[] {
-  return tasks.tasks.filter(t => t.status === status);
+export function getTasksByStatus(
+  tasks: TasksData,
+  status: Task["status"],
+): Task[] {
+  return tasks.tasks.filter((t) => t.status === status);
 }
 
-export function getProgress(tasks: TasksData): { total: number; completed: number; in_progress: number; pending: number; error: number } {
+export function getProgress(tasks: TasksData): {
+  total: number;
+  completed: number;
+  in_progress: number;
+  pending: number;
+  error: number;
+} {
   const all = tasks.tasks;
   return {
     total: all.length,
-    completed: all.filter(t => t.status === "completed").length,
-    in_progress: all.filter(t => t.status === "in_progress").length,
-    pending: all.filter(t => t.status === "pending").length,
-    error: all.filter(t => t.status === "error").length,
+    completed: all.filter((t) => t.status === "completed").length,
+    in_progress: all.filter((t) => t.status === "in_progress").length,
+    pending: all.filter((t) => t.status === "pending").length,
+    error: all.filter((t) => t.status === "error").length,
   };
 }
 
 export function calculateCoverage(tasks: TasksData): Requirement[] {
   if (!tasks.requirements || tasks.requirements.length === 0) return [];
 
-  return tasks.requirements.map(req => {
+  return tasks.requirements.map((req) => {
     const coveringTasks = req.covered_by
-      .map(id => tasks.tasks.find(t => t.id === id))
+      .map((id) => tasks.tasks.find((t) => t.id === id))
       .filter(Boolean) as Task[];
 
-    const completedCount = coveringTasks.filter(t => t.status === "completed").length;
+    const completedCount = coveringTasks.filter(
+      (t) => t.status === "completed",
+    ).length;
     const totalCount = coveringTasks.length;
 
     let status: Requirement["status"];

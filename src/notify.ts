@@ -26,7 +26,10 @@ export function isTelegramConfigured(): boolean {
   return !!config.telegram_bot_token && !!config.telegram_chat_id;
 }
 
-export async function sendTelegramTestMessage(botToken: string, chatId: string): Promise<boolean> {
+export async function sendTelegramTestMessage(
+  botToken: string,
+  chatId: string,
+): Promise<boolean> {
   const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
   try {
     const res = await fetch(url, {
@@ -82,68 +85,105 @@ function formatDuration(ms: number): string {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
-  return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+  return remainingSeconds > 0
+    ? `${minutes}m ${remainingSeconds}s`
+    : `${minutes}m`;
 }
 
 export function formatTaskStarted(task: Task): string {
   const specialist = task.specialist ? ` (${task.specialist})` : "";
-  return `🚀 *Task ${task.id} started*\n` +
+  return (
+    `🚀 *Task ${task.id} started*\n` +
     `${task.title}${specialist}\n` +
-    `Workstream: ${task.workstream}`;
+    `Workstream: ${task.workstream}`
+  );
 }
 
 export function formatTaskCompleted(task: Task): string {
-  const duration = task.started_at && task.completed_at
-    ? formatDuration(new Date(task.completed_at).getTime() - new Date(task.started_at).getTime())
-    : "unknown";
+  const duration =
+    task.started_at && task.completed_at
+      ? formatDuration(
+          new Date(task.completed_at).getTime() -
+            new Date(task.started_at).getTime(),
+        )
+      : "unknown";
   const specialist = task.specialist ? ` (${task.specialist})` : "";
-  return `✅ *Task ${task.id} completed*\n` +
+  return (
+    `✅ *Task ${task.id} completed*\n` +
     `${task.title}${specialist}\n` +
-    `Duration: ${duration}`;
+    `Duration: ${duration}`
+  );
 }
 
 export function formatTaskError(task: Task, attempt: number): string {
   const error = task.error || "Unknown error";
-  return `❌ *Task ${task.id} failed* (attempt ${attempt})\n` +
+  return (
+    `❌ *Task ${task.id} failed* (attempt ${attempt})\n` +
     `${task.title}\n` +
-    `Error: ${error}`;
+    `Error: ${error}`
+  );
 }
 
 export function formatCriticalError(context: string): string {
-  return `🚨 *CRITICAL ERROR*\n` +
-    `*Immediate attention required*\n` +
-    `${context}`;
+  return (
+    `🚨 *CRITICAL ERROR*\n` + `*Immediate attention required*\n` + `${context}`
+  );
 }
 
-export function formatWorkstreamCompleted(name: string, completed: number, total: number): string {
-  return `🎉 *Workstream ${name}* — Completed\n` +
-    `${completed}/${total} tasks done`;
+export function formatWorkstreamCompleted(
+  name: string,
+  completed: number,
+  total: number,
+): string {
+  return (
+    `🎉 *Workstream ${name}* — Completed\n` + `${completed}/${total} tasks done`
+  );
 }
 
 export function formatWorkstreamBlocked(name: string, deps: string[]): string {
-  return `⚠️ *Workstream ${name}* — Blocked\n` +
-    `Waiting on: ${deps.join(", ")}`;
+  return (
+    `⚠️ *Workstream ${name}* — Blocked\n` + `Waiting on: ${deps.join(", ")}`
+  );
 }
 
-export function formatMilestone(percentage: number, completed: number, total: number, activeWorkstreams: string[]): string {
-  const ws = activeWorkstreams.length > 0 ? `\nActive: ${activeWorkstreams.join(", ")}` : "";
-  return `🏁 *Milestone: ${percentage}% complete*\n` +
-    `${completed}/${total} tasks done${ws}`;
+export function formatMilestone(
+  percentage: number,
+  completed: number,
+  total: number,
+  activeWorkstreams: string[],
+): string {
+  const ws =
+    activeWorkstreams.length > 0
+      ? `\nActive: ${activeWorkstreams.join(", ")}`
+      : "";
+  return (
+    `🏁 *Milestone: ${percentage}% complete*\n` +
+    `${completed}/${total} tasks done${ws}`
+  );
 }
 
-export function formatWorkstreamReview(workstream: string, verdict: "PASS" | "FAIL", summary: string, issues: string[]): string {
+export function formatWorkstreamReview(
+  workstream: string,
+  verdict: "PASS" | "FAIL",
+  summary: string,
+  issues: string[],
+): string {
   if (verdict === "PASS") {
     return `✅ *Workstream ${workstream} review PASSED*\n${summary}`;
   }
-  const issueList = issues.length > 0
-    ? `\n${issues.map(i => `• ${i}`).join("\n")}`
-    : "";
+  const issueList =
+    issues.length > 0 ? `\n${issues.map((i) => `• ${i}`).join("\n")}` : "";
   return `❌ *Workstream ${workstream} review FAILED*\n${summary}${issueList}`;
 }
 
-export function formatReviewEscalation(workstream: string, taskIds: string[], retryCount: number): string {
-  return `🚨 *ESCALATION: Workstream ${workstream}*\n` +
+export function formatReviewEscalation(
+  workstream: string,
+  taskIds: string[],
+  retryCount: number,
+): string {
+  return (
+    `🚨 *ESCALATION: Workstream ${workstream}*\n` +
     `Tasks failed review ${retryCount} times and need manual intervention:\n` +
-    taskIds.map(id => `• ${id}`).join("\n");
+    taskIds.map((id) => `• ${id}`).join("\n")
+  );
 }
-

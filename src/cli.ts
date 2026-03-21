@@ -1,14 +1,68 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync, statSync, chmodSync, unlinkSync } from "fs";
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  copyFileSync,
+  readdirSync,
+  statSync,
+  chmodSync,
+  unlinkSync,
+} from "fs";
 import { join, dirname } from "path";
 import { spawn, ChildProcess } from "child_process";
 import { BART, BART_DIR, DEFAULT_QUALITY_GATE } from "./constants.js";
-import { readTasks, findNextTask, getCwd, getTaskById, resolvePlanTasksPath, countReviewRetriesForTask } from "./tasks.js";
-import { printStatus, printWorkstreamStatus, printRequirementsReport } from "./status.js";
+import {
+  readTasks,
+  findNextTask,
+  getCwd,
+  getTaskById,
+  resolvePlanTasksPath,
+  countReviewRetriesForTask,
+} from "./tasks.js";
+import {
+  printStatus,
+  printWorkstreamStatus,
+  printRequirementsReport,
+} from "./status.js";
 import { runDashboard } from "./dashboard.js";
 import { runPlanCommand } from "./plan.js";
-import { sendTelegram, sendTelegramTestMessage, formatTaskStarted, formatTaskCompleted, formatTaskError, formatCriticalError, formatWorkstreamCompleted, formatWorkstreamBlocked, formatMilestone, formatWorkstreamReview, formatReviewEscalation } from "./notify.js";
-import { discoverSpecialists, printSpecialists, appendHistory, extractPlanSlug, countResetsForTask, countWorkstreamErrors, countWorkstreamReviewFailures, printSpecialistHistory, scoreSpecialists, loadHistory, recordPairing, loadSpecialistModel, printSpecialistBoard, generateSpecialistsSummary, appendProfileLearning, resolveProfileContext } from "./specialists.js";
-import { generateZshCompletion, generateBashCompletion, installCompletions } from "./completions.js";
+import {
+  sendTelegram,
+  sendTelegramTestMessage,
+  formatTaskStarted,
+  formatTaskCompleted,
+  formatTaskError,
+  formatCriticalError,
+  formatWorkstreamCompleted,
+  formatWorkstreamBlocked,
+  formatMilestone,
+  formatWorkstreamReview,
+  formatReviewEscalation,
+} from "./notify.js";
+import {
+  discoverSpecialists,
+  printSpecialists,
+  appendHistory,
+  extractPlanSlug,
+  countResetsForTask,
+  countWorkstreamErrors,
+  countWorkstreamReviewFailures,
+  printSpecialistHistory,
+  scoreSpecialists,
+  loadHistory,
+  recordPairing,
+  loadSpecialistModel,
+  printSpecialistBoard,
+  generateSpecialistsSummary,
+  appendProfileLearning,
+  resolveProfileContext,
+} from "./specialists.js";
+import {
+  generateZshCompletion,
+  generateBashCompletion,
+  installCompletions,
+} from "./completions.js";
 
 const CONFIG_DIR = join(process.env.HOME || "", ".bart");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -51,7 +105,9 @@ let shuttingDown = false;
 function checkStopSignal(cwd: string): boolean {
   const stopPath = join(cwd, BART_DIR, STOP_FILE);
   if (existsSync(stopPath)) {
-    try { unlinkSync(stopPath); } catch {}
+    try {
+      unlinkSync(stopPath);
+    } catch {}
     return true;
   }
   return false;
@@ -141,7 +197,7 @@ export function clearMode(cwd: string): void {
 function resetInProgressTask(tasksPath: string, taskId: string) {
   try {
     const tasksData = readTasks(tasksPath);
-    const idx = tasksData.tasks.findIndex(t => t.id === taskId);
+    const idx = tasksData.tasks.findIndex((t) => t.id === taskId);
     if (idx !== -1 && tasksData.tasks[idx].status === "in_progress") {
       tasksData.tasks[idx].status = "pending";
       tasksData.tasks[idx].started_at = null;
@@ -188,7 +244,11 @@ function installSignalHandlers(cwd: string) {
  * 1) --tasks flag (explicit escape hatch)
  * 2) --plan <slug> / auto-discover / legacy fallback (via resolvePlanTasksPath)
  */
-function resolveTasksPath(cwd: string, tasksFlag?: string, planSlug?: string): string {
+function resolveTasksPath(
+  cwd: string,
+  tasksFlag?: string,
+  planSlug?: string,
+): string {
   if (tasksFlag) {
     return tasksFlag;
   }
@@ -201,12 +261,20 @@ function resolveTasksPath(cwd: string, tasksFlag?: string, planSlug?: string): s
 function listPlans(cwd: string) {
   const plansDir = join(cwd, ".bart", "plans");
   if (!existsSync(plansDir)) {
-    console.log("No plans found. Run 'bart plan' to generate tasks from a plan.");
+    console.log(
+      "No plans found. Run 'bart plan' to generate tasks from a plan.",
+    );
     return;
   }
 
   const entries = readdirSync(plansDir).sort();
-  const plans: { slug: string; total: number; completed: number; workstreams: string[]; mtime: Date }[] = [];
+  const plans: {
+    slug: string;
+    total: number;
+    completed: number;
+    workstreams: string[];
+    mtime: Date;
+  }[] = [];
 
   for (const entry of entries) {
     const entryPath = join(plansDir, entry);
@@ -222,18 +290,36 @@ function listPlans(cwd: string) {
       try {
         const data = readTasks(tasksFile);
         const total = data.tasks.length;
-        const completed = data.tasks.filter(t => t.status === "completed").length;
-        const workstreams = [...new Set(data.tasks.map(t => t.workstream).filter(Boolean))].sort();
+        const completed = data.tasks.filter(
+          (t) => t.status === "completed",
+        ).length;
+        const workstreams = [
+          ...new Set(data.tasks.map((t) => t.workstream).filter(Boolean)),
+        ].sort();
         const fstat = statSync(tasksFile);
-        plans.push({ slug: entry, total, completed, workstreams, mtime: fstat.mtime });
+        plans.push({
+          slug: entry,
+          total,
+          completed,
+          workstreams,
+          mtime: fstat.mtime,
+        });
       } catch {
-        plans.push({ slug: entry, total: 0, completed: 0, workstreams: [], mtime: new Date(0) });
+        plans.push({
+          slug: entry,
+          total: 0,
+          completed: 0,
+          workstreams: [],
+          mtime: new Date(0),
+        });
       }
     }
   }
 
   if (plans.length === 0) {
-    console.log("No plan executions found. Run 'bart plan' to generate tasks from a plan.");
+    console.log(
+      "No plan executions found. Run 'bart plan' to generate tasks from a plan.",
+    );
     return;
   }
 
@@ -244,14 +330,17 @@ function listPlans(cwd: string) {
   for (let i = 0; i < plans.length; i++) {
     const plan = plans[i];
     const isActive = i === 0;
-    const pct = plan.total > 0 ? Math.round((plan.completed / plan.total) * 100) : 0;
+    const pct =
+      plan.total > 0 ? Math.round((plan.completed / plan.total) * 100) : 0;
     const icon = pct === 100 ? "✅" : pct > 0 ? "🔄" : "⏳";
     const activeTag = isActive ? " (active)" : "";
     const date = plan.mtime.toLocaleDateString();
     const ws = plan.workstreams.length > 0 ? plan.workstreams.join(", ") : "—";
 
     console.log(`  ${icon} ${plan.slug}${activeTag}`);
-    console.log(`     Tasks: ${plan.completed}/${plan.total} done (${pct}%)  |  Workstreams: ${ws}  |  ${date}`);
+    console.log(
+      `     Tasks: ${plan.completed}/${plan.total} done (${pct}%)  |  Workstreams: ${ws}  |  ${date}`,
+    );
   }
   console.log(`\nUse 'bart status --plan <slug>' to view a specific plan.`);
   console.log(`Use 'bart run --plan <slug>' to run tasks for a specific plan.`);
@@ -259,27 +348,27 @@ function listPlans(cwd: string) {
 
 async function detectAgent(): Promise<{ cmd: string; args: string[] }> {
   const config = loadConfig();
-  
+
   if (config.agent === "opencode") {
     return { cmd: "opencode", args: ["run"] };
   }
   if (config.agent === "claude") {
     return { cmd: "claude", args: ["-p"] };
   }
-  
+
   const { promisify } = require("util");
   const exec = promisify(require("child_process").exec);
-  
+
   try {
     await exec("opencode --version", { stdio: "ignore" });
     return { cmd: "opencode", args: ["run"] };
   } catch {}
-  
+
   try {
     await exec("claude --version", { stdio: "ignore" });
     return { cmd: "claude", args: ["-p"] };
   } catch {}
-  
+
   return { cmd: "claude", args: ["-p"] };
 }
 
@@ -376,7 +465,7 @@ export async function runWorkstreamReview(
 ): Promise<WorkstreamReviewResult> {
   const tasksData = readTasks(tasksPath);
   const projectRoot = tasksData.project_root || process.cwd();
-  const wsTasks = tasksData.tasks.filter(t => t.workstream === workstreamId);
+  const wsTasks = tasksData.tasks.filter((t) => t.workstream === workstreamId);
 
   if (wsTasks.length === 0) {
     return { verdict: "PASS", issues: [], summary: "No tasks in workstream." };
@@ -386,36 +475,45 @@ export async function runWorkstreamReview(
   console.log(`   Tasks to review: ${wsTasks.length}`);
 
   // 1. Collect all task descriptions and requirements
-  const taskSummaries = wsTasks.map(t => {
-    const reqs = t.requirements && t.requirements.length > 0
-      ? `\n   Requirements: ${t.requirements.join(", ")}`
-      : "";
-    return `- [${t.id}] ${t.title}\n   Description: ${t.description}\n   Files: ${t.files.join(", ")}${reqs}`;
-  }).join("\n\n");
+  const taskSummaries = wsTasks
+    .map((t) => {
+      const reqs =
+        t.requirements && t.requirements.length > 0
+          ? `\n   Requirements: ${t.requirements.join(", ")}`
+          : "";
+      return `- [${t.id}] ${t.title}\n   Description: ${t.description}\n   Files: ${t.files.join(", ")}${reqs}`;
+    })
+    .join("\n\n");
 
   // 2. Collect all files modified across the workstream (deduplicated)
-  const allFilesModified = [...new Set(
-    wsTasks.flatMap(t => t.files_modified || [])
-  )].sort();
-  const allFilesDeclared = [...new Set(
-    wsTasks.flatMap(t => t.files || [])
-  )].sort();
+  const allFilesModified = [
+    ...new Set(wsTasks.flatMap((t) => t.files_modified || [])),
+  ].sort();
+  const allFilesDeclared = [
+    ...new Set(wsTasks.flatMap((t) => t.files || [])),
+  ].sort();
 
   // 3. Collect requirements that should be covered
-  const wsRequirementIds = [...new Set(
-    wsTasks.flatMap(t => t.requirements || [])
-  )];
+  const wsRequirementIds = [
+    ...new Set(wsTasks.flatMap((t) => t.requirements || [])),
+  ];
   let requirementsSection = "";
   if (wsRequirementIds.length > 0 && tasksData.requirements) {
-    const wsReqs = tasksData.requirements.filter(r => wsRequirementIds.includes(r.id));
-    requirementsSection = `\n## Requirements to Validate\n\n${wsReqs.map(r =>
-      `- ${r.id}: ${r.description} (covered by: ${r.covered_by.join(", ")})`
-    ).join("\n")}`;
+    const wsReqs = tasksData.requirements.filter((r) =>
+      wsRequirementIds.includes(r.id),
+    );
+    requirementsSection = `\n## Requirements to Validate\n\n${wsReqs
+      .map(
+        (r) =>
+          `- ${r.id}: ${r.description} (covered by: ${r.covered_by.join(", ")})`,
+      )
+      .join("\n")}`;
   }
 
-  const filesModifiedSection = allFilesModified.length > 0
-    ? `\n## Files Modified Across Workstream\n\n${allFilesModified.map(f => `- ${f}`).join("\n")}`
-    : `\n## Files Declared in Tasks\n\n${allFilesDeclared.map(f => `- ${f}`).join("\n")}`;
+  const filesModifiedSection =
+    allFilesModified.length > 0
+      ? `\n## Files Modified Across Workstream\n\n${allFilesModified.map((f) => `- ${f}`).join("\n")}`
+      : `\n## Files Declared in Tasks\n\n${allFilesDeclared.map((f) => `- ${f}`).join("\n")}`;
 
   const reviewPrompt = `You are a workstream reviewer for an automated task pipeline. Your job is to review ALL completed work in workstream "${workstreamId}" and produce a quality verdict.
 
@@ -463,15 +561,29 @@ Use PASS only if all checks pass with no significant issues. Use FAIL if any req
   // Resolve agent config
   let agentConfig: { cmd: string; args: string[] };
   if (agentOverride) {
-    agentConfig = agentOverride === "opencode"
-      ? { cmd: "opencode", args: ["run", "--dangerously-skip-permissions"] }
-      : { cmd: "claude", args: ["-p", "--dangerously-skip-permissions", "--output-format", "text"] };
+    agentConfig =
+      agentOverride === "opencode"
+        ? { cmd: "opencode", args: ["run", "--dangerously-skip-permissions"] }
+        : {
+            cmd: "claude",
+            args: [
+              "-p",
+              "--dangerously-skip-permissions",
+              "--output-format",
+              "text",
+            ],
+          };
   } else {
     agentConfig = await detectAgent();
     if (agentConfig.cmd === "opencode") {
       agentConfig.args = ["run", "--dangerously-skip-permissions"];
     } else {
-      agentConfig.args = ["-p", "--dangerously-skip-permissions", "--output-format", "text"];
+      agentConfig.args = [
+        "-p",
+        "--dangerously-skip-permissions",
+        "--output-format",
+        "text",
+      ];
     }
   }
 
@@ -570,12 +682,16 @@ function parseReviewVerdict(output: string): WorkstreamReviewResult {
   }
 
   // Build summary from the text before the verdict
-  const summaryLines = lines.slice(Math.max(0, verdictIdx - 5), verdictIdx)
-    .map(l => l.trim())
-    .filter(l => l.length > 0);
-  const summary = summaryLines.length > 0
-    ? summaryLines.join(" ")
-    : verdict === "PASS" ? "All checks passed." : "Review found issues.";
+  const summaryLines = lines
+    .slice(Math.max(0, verdictIdx - 5), verdictIdx)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  const summary =
+    summaryLines.length > 0
+      ? summaryLines.join(" ")
+      : verdict === "PASS"
+        ? "All checks passed."
+        : "Review found issues.";
 
   return { verdict, issues, summary };
 }
@@ -585,7 +701,10 @@ function parseReviewVerdict(output: string): WorkstreamReviewResult {
  * Matches issues to tasks by checking if the issue text references task IDs or file paths.
  * Falls back to returning all tasks if no specific matches are found.
  */
-function identifyAffectedTasks(wsTasks: import("./constants.js").Task[], issues: string[]): import("./constants.js").Task[] {
+function identifyAffectedTasks(
+  wsTasks: import("./constants.js").Task[],
+  issues: string[],
+): import("./constants.js").Task[] {
   if (issues.length === 0) return wsTasks;
 
   const issueText = issues.join("\n").toLowerCase();
@@ -609,7 +728,7 @@ function identifyAffectedTasks(wsTasks: import("./constants.js").Task[], issues:
   // If no specific tasks matched, reset all tasks in the workstream
   if (matched.size === 0) return wsTasks;
 
-  return wsTasks.filter(t => matched.has(t.id));
+  return wsTasks.filter((t) => matched.has(t.id));
 }
 
 /**
@@ -617,12 +736,17 @@ function identifyAffectedTasks(wsTasks: import("./constants.js").Task[], issues:
  * When metadata is available, includes test command, framework, and conventions.
  * When absent, instructs the specialist to discover the test setup.
  */
-export function buildTestingContextBlock(testingMeta: import("./constants.js").TestingMetadata | null | undefined): string {
+export function buildTestingContextBlock(
+  testingMeta: import("./constants.js").TestingMetadata | null | undefined,
+): string {
   if (testingMeta) {
     const parts: string[] = [];
-    if (testingMeta.test_command) parts.push(`Test command: \`${testingMeta.test_command}\``);
-    if (testingMeta.framework) parts.push(`Framework: ${testingMeta.framework}`);
-    if (testingMeta.conventions) parts.push(`Conventions: ${testingMeta.conventions}`);
+    if (testingMeta.test_command)
+      parts.push(`Test command: \`${testingMeta.test_command}\``);
+    if (testingMeta.framework)
+      parts.push(`Framework: ${testingMeta.framework}`);
+    if (testingMeta.conventions)
+      parts.push(`Conventions: ${testingMeta.conventions}`);
     return `\n${parts.join("\n")}`;
   }
   return `\nNo test command specified in the plan. Discover the project's test setup by examining package.json, existing test files, CI config, or test configuration files, then use the appropriate test command.`;
@@ -668,8 +792,15 @@ export function buildSelfReviewBlock(options: {
   testingContextBlock: string;
   definitionOfDone?: string | null;
 }): string {
-  const { specialistPremises, specialistTestExpectations, testingContextBlock, definitionOfDone } = options;
-  const defaultQualityGate = DEFAULT_QUALITY_GATE.map(s => `\n- ${s}`).join("");
+  const {
+    specialistPremises,
+    specialistTestExpectations,
+    testingContextBlock,
+    definitionOfDone,
+  } = options;
+  const defaultQualityGate = DEFAULT_QUALITY_GATE.map((s) => `\n- ${s}`).join(
+    "",
+  );
 
   return `
 
@@ -683,10 +814,17 @@ Before marking this task as done, you MUST perform a self-review. Do NOT conside
 - If you added anything beyond the task scope, revert it
 
 ### 2. Code Quality Check
-- Review all changes for correctness, readability, and maintainability${specialistPremises ? `
+- Review all changes for correctness, readability, and maintainability${
+    specialistPremises
+      ? `
 - Apply the specialist's standards as the quality bar:
-${specialistPremises.split("\n").map(line => `  ${line}`).join("\n")}` : `
-- Apply these default quality standards:${defaultQualityGate}`}
+${specialistPremises
+  .split("\n")
+  .map((line) => `  ${line}`)
+  .join("\n")}`
+      : `
+- Apply these default quality standards:${defaultQualityGate}`
+  }
 
 ### 3. TDD Protocol (Mandatory)
 
@@ -696,15 +834,21 @@ You MUST follow this sequence for every change:
 3. WRITE the minimal implementation to make the test pass
 4. RUN the test and verify it PASSES
 5. COMMIT the test and implementation together
-${specialistTestExpectations && specialistTestExpectations.length > 0
-? `\nSpecialist test expectations:${specialistTestExpectations.map(e => `\n- ${e}`).join("")}`
-: ""}
-${testingContextBlock}${definitionOfDone ? `
+${
+  specialistTestExpectations && specialistTestExpectations.length > 0
+    ? `\nSpecialist test expectations:${specialistTestExpectations.map((e) => `\n- ${e}`).join("")}`
+    : ""
+}
+${testingContextBlock}${
+    definitionOfDone
+      ? `
 ### 4. Task-Specific Definition of Done
 
 Verify each item before marking this task complete:
 ${definitionOfDone}
-` : ""}
+`
+      : ""
+  }
 ### Evidence Requirement
 Before marking this task complete, you MUST:
 - Show actual test command output (not assumptions)
@@ -752,7 +896,10 @@ Please complete this task.${selfReviewBlock}`;
  * Adds a `## Review Feedback` section (if not present) and appends a numbered attempt subsection.
  * Returns true if feedback was appended, false if the file does not exist (fallback to tasks.json).
  */
-export function appendReviewFeedback(taskMdPath: string, issues: string[]): boolean {
+export function appendReviewFeedback(
+  taskMdPath: string,
+  issues: string[],
+): boolean {
   if (!existsSync(taskMdPath)) {
     return false;
   }
@@ -763,7 +910,7 @@ export function appendReviewFeedback(taskMdPath: string, issues: string[]): bool
   const attemptMatches = content.match(/### Attempt \d+ — REJECTED/g);
   const attemptNumber = attemptMatches ? attemptMatches.length + 1 : 1;
 
-  const issuesList = issues.map(issue => `- ${issue}`).join("\n");
+  const issuesList = issues.map((issue) => `- ${issue}`).join("\n");
   const attemptBlock = `### Attempt ${attemptNumber} — REJECTED\n${issuesList}\n`;
 
   let newContent: string;
@@ -772,7 +919,8 @@ export function appendReviewFeedback(taskMdPath: string, issues: string[]): bool
     newContent = content.trimEnd() + "\n\n" + attemptBlock;
   } else {
     // Add new feedback section at end
-    newContent = content.trimEnd() + "\n\n## Review Feedback\n\n" + attemptBlock;
+    newContent =
+      content.trimEnd() + "\n\n## Review Feedback\n\n" + attemptBlock;
   }
 
   writeFileSync(taskMdPath, newContent);
@@ -822,7 +970,14 @@ export function assembleTaskPrompt(options: {
   specialistTestExpectations?: string[];
   testingMetadata?: import("./constants.js").TestingMetadata | null;
 }): string {
-  const { task, tasksPath, specialistContext, specialistPremises, specialistTestExpectations, testingMetadata } = options;
+  const {
+    task,
+    tasksPath,
+    specialistContext,
+    specialistPremises,
+    specialistTestExpectations,
+    testingMetadata,
+  } = options;
 
   const testingContextBlock = buildTestingContextBlock(testingMetadata);
 
@@ -845,16 +1000,22 @@ export function assembleTaskPrompt(options: {
   return buildTaskPrompt(task, tasksPath, specialistContext, selfReviewBlock);
 }
 
-export async function runAgent(taskId: string, tasksPath: string, agentOverride?: string, autoContinue?: boolean, firedMilestones?: Set<number>) {
+export async function runAgent(
+  taskId: string,
+  tasksPath: string,
+  agentOverride?: string,
+  autoContinue?: boolean,
+  firedMilestones?: Set<number>,
+) {
   const tasks = readTasks(tasksPath);
   const task = getTaskById(tasks, taskId);
-  
+
   if (!task) {
     console.error(`Task ${taskId} not found`);
     process.exit(1);
   }
-  
-  const completedTasks = tasks.tasks.filter(t => t.status === "completed");
+
+  const completedTasks = tasks.tasks.filter((t) => t.status === "completed");
   if (completedTasks.length > 0) {
     console.log(`\n✅ Previously completed (${completedTasks.length}):`);
     for (const t of completedTasks) {
@@ -862,30 +1023,33 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
     }
     console.log("");
   }
-  
+
   const projectRoot = tasks.project_root || process.cwd();
-  
+
   console.log(`\n🚀 Starting task: ${taskId} — ${task.title}`);
   console.log(`   Workstream: ${task.workstream}`);
   console.log(`📁 Working directory: ${projectRoot}`);
   console.log(`📄 Task file: ${resolveTaskFilePath(tasksPath, taskId)}\n`);
 
   const tasksData = readTasks(tasksPath);
-  const taskIndex = tasksData.tasks.findIndex(t => t.id === taskId);
+  const taskIndex = tasksData.tasks.findIndex((t) => t.id === taskId);
   if (taskIndex !== -1) {
     tasksData.tasks[taskIndex].status = "in_progress";
     tasksData.tasks[taskIndex].started_at = new Date().toISOString();
     writeFileSync(tasksPath, JSON.stringify(tasksData, null, 2));
-    console.log(`   Status: ${taskId} → in_progress | Workstream ${task.workstream} → active\n`);
+    console.log(
+      `   Status: ${taskId} → in_progress | Workstream ${task.workstream} → active\n`,
+    );
   }
 
   await sendTelegram(formatTaskStarted(task));
-  
+
   let agentConfig: { cmd: string; args: string[] };
   if (agentOverride) {
-    agentConfig = agentOverride === "opencode" 
-      ? { cmd: "opencode", args: ["run", "--dangerously-skip-permissions"] }
-      : { cmd: "claude", args: ["-p", "--dangerously-skip-permissions"] };
+    agentConfig =
+      agentOverride === "opencode"
+        ? { cmd: "opencode", args: ["run", "--dangerously-skip-permissions"] }
+        : { cmd: "claude", args: ["-p", "--dangerously-skip-permissions"] };
   } else {
     agentConfig = await detectAgent();
     if (agentConfig.cmd === "opencode") {
@@ -894,18 +1058,19 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
       agentConfig.args = ["-p", "--dangerously-skip-permissions"];
     }
   }
-  
+
   console.log(`🤖 Using agent: ${agentConfig.cmd}\n`);
-  
+
   // Build specialist context if task has an assigned specialist
   let specialistContext = "";
   let specialistPremises = "";
   let specialistTestExpectations: string[] | undefined;
   if (task.specialist) {
     const specialists = discoverSpecialists(projectRoot);
-    const specialist = specialists.find(s => s.name === task.specialist);
+    const specialist = specialists.find((s) => s.name === task.specialist);
     if (specialist) {
-      specialistContext = "\n" + resolveProfileContext(specialist, specialists) + "\n";
+      specialistContext =
+        "\n" + resolveProfileContext(specialist, specialists) + "\n";
       if (specialist.premises) {
         specialistPremises = specialist.premises;
       }
@@ -923,7 +1088,7 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
     specialistTestExpectations,
     testingMetadata: tasksData.testing,
   });
-  
+
   const args = [...agentConfig.args, taskPrompt];
 
   // Track for graceful shutdown
@@ -932,7 +1097,7 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
 
   const child = spawn(agentConfig.cmd, args, {
     cwd: projectRoot,
-    stdio: "inherit"
+    stdio: "inherit",
   });
   currentChild = child;
 
@@ -959,10 +1124,11 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
 
     // Log error to history and update task status
     const errTasksData = readTasks(tasksPath);
-    const errTaskIndex = errTasksData.tasks.findIndex(t => t.id === taskId);
+    const errTaskIndex = errTasksData.tasks.findIndex((t) => t.id === taskId);
     if (errTaskIndex !== -1) {
       errTasksData.tasks[errTaskIndex].status = "error";
-      errTasksData.tasks[errTaskIndex].error = `Agent exited with code ${exitCode}`;
+      errTasksData.tasks[errTaskIndex].error =
+        `Agent exited with code ${exitCode}`;
       writeFileSync(tasksPath, JSON.stringify(errTasksData, null, 2));
 
       const errTask = errTasksData.tasks[errTaskIndex];
@@ -975,7 +1141,9 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
         plan_slug: planSlug,
         specialist: errTask.specialist || null,
         status: "error",
-        duration_ms: errTask.started_at ? Date.now() - new Date(errTask.started_at).getTime() : null,
+        duration_ms: errTask.started_at
+          ? Date.now() - new Date(errTask.started_at).getTime()
+          : null,
         resets,
         files: errTask.files,
         workstream: errTask.workstream,
@@ -986,12 +1154,18 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
       recordPairing(projectRoot, errTask, false);
 
       // Record learning in specialist profile [REQ-04]
-      appendProfileLearning(errTask, {
-        success: false,
-        error: `Agent exited with code ${exitCode}`,
-        durationMs: errTask.started_at ? Date.now() - new Date(errTask.started_at).getTime() : null,
-        filesModified: errTask.files_modified || [],
-      }, projectRoot);
+      appendProfileLearning(
+        errTask,
+        {
+          success: false,
+          error: `Agent exited with code ${exitCode}`,
+          durationMs: errTask.started_at
+            ? Date.now() - new Date(errTask.started_at).getTime()
+            : null,
+          filesModified: errTask.files_modified || [],
+        },
+        projectRoot,
+      );
 
       // Send error notification [REQ-05]
       await sendTelegram(formatTaskError(errTask, resets + 1));
@@ -999,29 +1173,38 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
       // Critical error detection [REQ-06]:
       // Trigger if same task failed 3+ times OR 3+ distinct tasks errored in this workstream
       const sameTaskFailures = resets + 1; // resets count + current error
-      const wsErrors = countWorkstreamErrors(projectRoot, errTask.workstream, planSlug);
+      const wsErrors = countWorkstreamErrors(
+        projectRoot,
+        errTask.workstream,
+        planSlug,
+      );
       if (sameTaskFailures >= 3) {
-        await sendTelegram(formatCriticalError(
-          `Task ${errTask.id} has failed ${sameTaskFailures} times.\n` +
-          `Workstream: ${errTask.workstream}\n` +
-          `Task: ${errTask.title}`
-        ));
+        await sendTelegram(
+          formatCriticalError(
+            `Task ${errTask.id} has failed ${sameTaskFailures} times.\n` +
+              `Workstream: ${errTask.workstream}\n` +
+              `Task: ${errTask.title}`,
+          ),
+        );
       } else if (wsErrors >= 3) {
-        await sendTelegram(formatCriticalError(
-          `${wsErrors} distinct tasks have errored in workstream ${errTask.workstream}.\n` +
-          `Latest failure: ${errTask.id} — ${errTask.title}`
-        ));
+        await sendTelegram(
+          formatCriticalError(
+            `${wsErrors} distinct tasks have errored in workstream ${errTask.workstream}.\n` +
+              `Latest failure: ${errTask.id} — ${errTask.title}`,
+          ),
+        );
       }
     }
 
     process.exit(exitCode || 1);
   }
-  
+
   const finalTasksData = readTasks(tasksPath);
-  const finalTaskIndex = finalTasksData.tasks.findIndex(t => t.id === taskId);
+  const finalTaskIndex = finalTasksData.tasks.findIndex((t) => t.id === taskId);
   if (finalTaskIndex !== -1) {
     finalTasksData.tasks[finalTaskIndex].status = "completed";
-    finalTasksData.tasks[finalTaskIndex].completed_at = new Date().toISOString();
+    finalTasksData.tasks[finalTaskIndex].completed_at =
+      new Date().toISOString();
     writeFileSync(tasksPath, JSON.stringify(finalTasksData, null, 2));
     console.log(`\n✅ Task ${taskId} marked as completed`);
 
@@ -1034,7 +1217,9 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
       plan_slug: planSlug,
       specialist: completedTask.specialist || null,
       status: "completed",
-      duration_ms: completedTask.started_at ? Date.now() - new Date(completedTask.started_at).getTime() : null,
+      duration_ms: completedTask.started_at
+        ? Date.now() - new Date(completedTask.started_at).getTime()
+        : null,
       resets: countResetsForTask(projectRoot, taskId, planSlug),
       files: completedTask.files,
       workstream: completedTask.workstream,
@@ -1045,24 +1230,34 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
     recordPairing(projectRoot, completedTask, true);
 
     // Record learning in specialist profile [REQ-04]
-    appendProfileLearning(completedTask, {
-      success: true,
-      durationMs: completedTask.started_at ? Date.now() - new Date(completedTask.started_at).getTime() : null,
-      filesModified: completedTask.files_modified || [],
-    }, projectRoot);
+    appendProfileLearning(
+      completedTask,
+      {
+        success: true,
+        durationMs: completedTask.started_at
+          ? Date.now() - new Date(completedTask.started_at).getTime()
+          : null,
+        filesModified: completedTask.files_modified || [],
+      },
+      projectRoot,
+    );
 
     await sendTelegram(formatTaskCompleted(completedTask));
 
     // Milestone check: right after task completion, check if we crossed a threshold
     const milestoneTotal = finalTasksData.tasks.length;
-    const milestoneCompleted = finalTasksData.tasks.filter(t => t.status === "completed").length;
+    const milestoneCompleted = finalTasksData.tasks.filter(
+      (t) => t.status === "completed",
+    ).length;
     if (milestoneTotal > 0) {
       const pct = Math.round((milestoneCompleted / milestoneTotal) * 100);
       // Seed firedMilestones on first use (single-task execution)
       if (!firedMilestones) {
         firedMilestones = new Set<number>();
         // Seed with thresholds already passed before this task
-        const prevPct = Math.round((Math.max(0, milestoneCompleted - 1) / milestoneTotal) * 100);
+        const prevPct = Math.round(
+          (Math.max(0, milestoneCompleted - 1) / milestoneTotal) * 100,
+        );
         for (const threshold of MILESTONE_THRESHOLDS) {
           if (prevPct >= threshold) {
             firedMilestones.add(threshold);
@@ -1072,13 +1267,24 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
       for (const threshold of MILESTONE_THRESHOLDS) {
         if (pct >= threshold && !firedMilestones.has(threshold)) {
           firedMilestones.add(threshold);
-          const activeWs = [...new Set(
-            finalTasksData.tasks
-              .filter(t => t.status === "in_progress" || t.status === "pending")
-              .map(t => t.workstream)
-              .filter(Boolean)
-          )];
-          await sendTelegram(formatMilestone(threshold, milestoneCompleted, milestoneTotal, activeWs));
+          const activeWs = [
+            ...new Set(
+              finalTasksData.tasks
+                .filter(
+                  (t) => t.status === "in_progress" || t.status === "pending",
+                )
+                .map((t) => t.workstream)
+                .filter(Boolean),
+            ),
+          ];
+          await sendTelegram(
+            formatMilestone(
+              threshold,
+              milestoneCompleted,
+              milestoneTotal,
+              activeWs,
+            ),
+          );
         }
       }
     }
@@ -1087,23 +1293,28 @@ export async function runAgent(taskId: string, tasksPath: string, agentOverride?
   // Clear tracking state after task completes normally
   currentTaskId = null;
 
-  const shouldAsk = autoContinue === false || (autoContinue === undefined && loadConfig().auto_continue === false);
+  const shouldAsk =
+    autoContinue === false ||
+    (autoContinue === undefined && loadConfig().auto_continue === false);
 
   if (shouldAsk) {
     const readline = require("readline").createInterface({
       input: process.stdin,
-      output: process.stdout
+      output: process.stdout,
     });
-    
+
     return new Promise<boolean>((resolve) => {
-      readline.question("\n🤔 Continue with next task? (Y/n) ", (answer: string) => {
-        readline.close();
-        const shouldContinue = answer.trim().toLowerCase() !== "n";
-        resolve(shouldContinue);
-      });
+      readline.question(
+        "\n🤔 Continue with next task? (Y/n) ",
+        (answer: string) => {
+          readline.close();
+          const shouldContinue = answer.trim().toLowerCase() !== "n";
+          resolve(shouldContinue);
+        },
+      );
     });
   }
-  
+
   return true;
 }
 
@@ -1114,9 +1325,9 @@ export async function main() {
   let command = args[0] || "status";
   let workstream: string | undefined;
   let specificTask: string | undefined;
-  let planFilePath: string | undefined;  // --plan-file <path> for 'bart plan' command
-  let planSlug: string | undefined;      // --plan <slug> for plan execution selection
-  let tasksFlag: string | undefined;     // --tasks <path> explicit escape hatch
+  let planFilePath: string | undefined; // --plan-file <path> for 'bart plan' command
+  let planSlug: string | undefined; // --plan <slug> for plan execution selection
+  let tasksFlag: string | undefined; // --tasks <path> explicit escape hatch
   let agentOverride: string | undefined;
   let autoContinue: boolean | undefined;
   let telegramSetup = false;
@@ -1143,7 +1354,11 @@ export async function main() {
     } else if (arg === "--plan-file" && args[i + 1]) {
       planFilePath = args[i + 1];
       skipNext = true;
-    } else if ((arg === "--agent" || arg === "-a") && args[i + 1] && (args[i + 1] === "claude" || args[i + 1] === "opencode")) {
+    } else if (
+      (arg === "--agent" || arg === "-a") &&
+      args[i + 1] &&
+      (args[i + 1] === "claude" || args[i + 1] === "opencode")
+    ) {
       agentOverride = args[i + 1];
       skipNext = true;
     } else if (arg === "--auto-continue" || arg === "--no-auto-continue") {
@@ -1164,7 +1379,7 @@ export async function main() {
 
   // Resolve tasksPath using priority chain
   const tasksPath = resolveTasksPath(cwd, tasksFlag, planSlug);
-  
+
   switch (command) {
     case "status":
     case "s":
@@ -1179,7 +1394,7 @@ export async function main() {
         console.log("No tasks.json found. Run 'bart init' to initialize.");
       }
       break;
-      
+
     case "dashboard":
     case "d":
       if (!existsSync(tasksPath)) {
@@ -1188,7 +1403,7 @@ export async function main() {
       }
       await runDashboard(tasksPath);
       break;
-      
+
     case "watch":
     case "w":
       console.log("Use Ctrl+C to exit dashboard. Auto-refresh every 2s.");
@@ -1198,7 +1413,7 @@ export async function main() {
       }
       await runDashboard(tasksPath);
       break;
-      
+
     case "run":
     case "r":
       if (!existsSync(tasksPath)) {
@@ -1216,9 +1431,13 @@ export async function main() {
       // but only if no other bart process is actively running (PID lock check)
       if (!isAnotherBartRunning(cwd)) {
         const recoveryTasks = readTasks(tasksPath);
-        const stale = recoveryTasks.tasks.filter(t => t.status === "in_progress");
+        const stale = recoveryTasks.tasks.filter(
+          (t) => t.status === "in_progress",
+        );
         if (stale.length > 0) {
-          console.log(`\n⚠️  Found ${stale.length} task(s) stuck in_progress from a previous run — resetting to pending:`);
+          console.log(
+            `\n⚠️  Found ${stale.length} task(s) stuck in_progress from a previous run — resetting to pending:`,
+          );
           for (const t of stale) {
             t.status = "pending";
             t.started_at = null;
@@ -1227,7 +1446,9 @@ export async function main() {
           writeFileSync(tasksPath, JSON.stringify(recoveryTasks, null, 2));
         }
       } else {
-        console.log(`\nℹ️  Another bart process is running — skipping stale task recovery`);
+        console.log(
+          `\nℹ️  Another bart process is running — skipping stale task recovery`,
+        );
       }
 
       // Acquire lock so other bart processes know we're running
@@ -1245,7 +1466,9 @@ export async function main() {
         const passedWorkstreams = new Set<string>();
         {
           const initialTasks = readTasks(tasksPath);
-          const initCompleted = initialTasks.tasks.filter(t => t.status === "completed").length;
+          const initCompleted = initialTasks.tasks.filter(
+            (t) => t.status === "completed",
+          ).length;
           const initTotal = initialTasks.tasks.length;
           if (initTotal > 0) {
             const initPct = Math.round((initCompleted / initTotal) * 100);
@@ -1259,54 +1482,86 @@ export async function main() {
         while (running) {
           // Check for stop signal from `bart stop`
           if (checkStopSignal(cwd)) {
-            console.log("\n⛔ Stop signal received (via 'bart stop'). Stopping after current iteration.");
+            console.log(
+              "\n⛔ Stop signal received (via 'bart stop'). Stopping after current iteration.",
+            );
             await sendTelegram("⛔ Bart run stopped by user (bart stop)");
             break;
           }
 
           iterations++;
           if (iterations > 100) {
-            console.log("\n⚠️ Safety limit reached (100 iterations). Stopping.");
+            console.log(
+              "\n⚠️ Safety limit reached (100 iterations). Stopping.",
+            );
             break;
           }
 
           const tasks = readTasks(tasksPath);
           const next = findNextTask(tasks, workstream);
-          
+
           if (next) {
             console.log("\n" + "=".repeat(50));
             console.log(`📋 Iteration ${iterations}: Running task ${next}`);
-            const shouldContinue = await runAgent(next, tasksPath, agentOverride, autoContinue, firedMilestones);
+            const shouldContinue = await runAgent(
+              next,
+              tasksPath,
+              agentOverride,
+              autoContinue,
+              firedMilestones,
+            );
 
             const tasksAfter = readTasks(tasksPath);
-            const currentTask = tasksAfter.tasks.find(t => t.id === next);
+            const currentTask = tasksAfter.tasks.find((t) => t.id === next);
             const ws = currentTask?.workstream;
 
             if (ws && !passedWorkstreams.has(ws)) {
-              const wsTasks = tasksAfter.tasks.filter(t => t.workstream === ws);
-              const wsCompleted = wsTasks.filter(t => t.status === "completed").length;
+              const wsTasks = tasksAfter.tasks.filter(
+                (t) => t.workstream === ws,
+              );
+              const wsCompleted = wsTasks.filter(
+                (t) => t.status === "completed",
+              ).length;
               const wsTotal = wsTasks.length;
 
               if (wsCompleted === wsTotal) {
                 console.log(`\n🎉 Workstream ${ws} completed!`);
-                await sendTelegram(formatWorkstreamCompleted(ws, wsCompleted, wsTotal));
+                await sendTelegram(
+                  formatWorkstreamCompleted(ws, wsCompleted, wsTotal),
+                );
 
                 // Run workstream review [REQ-02]
                 console.log("\n" + "=".repeat(50));
                 console.log(`🔍 Running workstream review for: ${ws}`);
-                const reviewResult = await runWorkstreamReview(ws, tasksPath, agentOverride);
+                const reviewResult = await runWorkstreamReview(
+                  ws,
+                  tasksPath,
+                  agentOverride,
+                );
                 const planSlugForReview = extractPlanSlug(tasksPath);
                 const projectRoot = tasksAfter.project_root || process.cwd();
 
                 if (reviewResult.verdict === "PASS") {
                   console.log(`\n✅ Workstream ${ws} review: PASS`);
                   console.log(`   ${reviewResult.summary}`);
-                  await sendTelegram(formatWorkstreamReview(ws, "PASS", reviewResult.summary, []));
+                  await sendTelegram(
+                    formatWorkstreamReview(
+                      ws,
+                      "PASS",
+                      reviewResult.summary,
+                      [],
+                    ),
+                  );
                   passedWorkstreams.add(ws);
 
                   // Mark review feedback as resolved in each task's markdown [REQ-02] [REQ-03]
-                  for (const t of wsTasks.filter(t => t.status === "completed")) {
-                    const taskMdPath = join(dirname(tasksPath), `task-${t.id}.md`);
+                  for (const t of wsTasks.filter(
+                    (t) => t.status === "completed",
+                  )) {
+                    const taskMdPath = join(
+                      dirname(tasksPath),
+                      `task-${t.id}.md`,
+                    );
                     markReviewFeedbackResolved(taskMdPath);
                   }
 
@@ -1320,7 +1575,7 @@ export async function main() {
                     status: "review_pass",
                     duration_ms: null,
                     resets: 0,
-                    files: [...new Set(wsTasks.flatMap(t => t.files))],
+                    files: [...new Set(wsTasks.flatMap((t) => t.files))],
                     workstream: ws,
                     title: `Workstream ${ws} review passed`,
                   });
@@ -1331,12 +1586,22 @@ export async function main() {
                   for (const issue of reviewResult.issues) {
                     console.log(`   • ${issue}`);
                   }
-                  await sendTelegram(formatWorkstreamReview(ws, "FAIL", reviewResult.summary, reviewResult.issues));
+                  await sendTelegram(
+                    formatWorkstreamReview(
+                      ws,
+                      "FAIL",
+                      reviewResult.summary,
+                      reviewResult.issues,
+                    ),
+                  );
 
                   // Identify affected tasks: match issues to tasks by file or ID references,
                   // or reset all tasks in the workstream if no specific match
-                  const affectedTasks = identifyAffectedTasks(wsTasks, reviewResult.issues);
-                  const affectedTaskIds = affectedTasks.map(t => t.id);
+                  const affectedTasks = identifyAffectedTasks(
+                    wsTasks,
+                    reviewResult.issues,
+                  );
+                  const affectedTaskIds = affectedTasks.map((t) => t.id);
 
                   // Per-task retry tracking [REQ-03]: check each task's prior review retries
                   const historyEntries = loadHistory(projectRoot);
@@ -1344,7 +1609,11 @@ export async function main() {
                   const tasksToEscalate: string[] = [];
 
                   for (const tid of affectedTaskIds) {
-                    const priorRetries = countReviewRetriesForTask(historyEntries, tid, planSlugForReview);
+                    const priorRetries = countReviewRetriesForTask(
+                      historyEntries,
+                      tid,
+                      planSlugForReview,
+                    );
                     if (priorRetries >= 2) {
                       tasksToEscalate.push(tid);
                     } else {
@@ -1353,7 +1622,11 @@ export async function main() {
                   }
 
                   // Record review failure in history (includes all affected tasks)
-                  const priorWsFailures = countWorkstreamReviewFailures(projectRoot, ws, planSlugForReview);
+                  const priorWsFailures = countWorkstreamReviewFailures(
+                    projectRoot,
+                    ws,
+                    planSlugForReview,
+                  );
                   appendHistory(projectRoot, {
                     timestamp: new Date().toISOString(),
                     event: "review_fail",
@@ -1363,7 +1636,7 @@ export async function main() {
                     status: "review_fail",
                     duration_ms: null,
                     resets: priorWsFailures + 1,
-                    files: [...new Set(wsTasks.flatMap(t => t.files))],
+                    files: [...new Set(wsTasks.flatMap((t) => t.files))],
                     workstream: ws,
                     title: `Workstream ${ws} review failed`,
                     review_issues: reviewResult.issues,
@@ -1372,47 +1645,74 @@ export async function main() {
 
                   // Handle escalated tasks — mark as needs_escalation [REQ-03]
                   if (tasksToEscalate.length > 0) {
-                    console.log(`\n🚨 ${tasksToEscalate.length} task(s) exceeded retry limit (2) — escalating: ${tasksToEscalate.join(", ")}`);
+                    console.log(
+                      `\n🚨 ${tasksToEscalate.length} task(s) exceeded retry limit (2) — escalating: ${tasksToEscalate.join(", ")}`,
+                    );
                     const escalateTasksData = readTasks(tasksPath);
                     for (const tid of tasksToEscalate) {
-                      const idx = escalateTasksData.tasks.findIndex(t => t.id === tid);
+                      const idx = escalateTasksData.tasks.findIndex(
+                        (t) => t.id === tid,
+                      );
                       if (idx !== -1) {
-                        escalateTasksData.tasks[idx].status = "needs_escalation";
-                        escalateTasksData.tasks[idx].error = `Review failed ${countReviewRetriesForTask(historyEntries, tid, planSlugForReview) + 1} times: ${reviewResult.issues.join("; ")}`;
+                        escalateTasksData.tasks[idx].status =
+                          "needs_escalation";
+                        escalateTasksData.tasks[idx].error =
+                          `Review failed ${countReviewRetriesForTask(historyEntries, tid, planSlugForReview) + 1} times: ${reviewResult.issues.join("; ")}`;
                       }
                     }
-                    writeFileSync(tasksPath, JSON.stringify(escalateTasksData, null, 2));
-                    await sendTelegram(formatReviewEscalation(ws, tasksToEscalate, 3));
+                    writeFileSync(
+                      tasksPath,
+                      JSON.stringify(escalateTasksData, null, 2),
+                    );
+                    await sendTelegram(
+                      formatReviewEscalation(ws, tasksToEscalate, 3),
+                    );
                   }
 
                   // Handle retryable tasks — reset to pending with feedback [REQ-03]
                   if (tasksToReset.length > 0) {
-                    console.log(`\n🔄 Retrying ${tasksToReset.length} task(s) in workstream ${ws}: ${tasksToReset.join(", ")}`);
+                    console.log(
+                      `\n🔄 Retrying ${tasksToReset.length} task(s) in workstream ${ws}: ${tasksToReset.join(", ")}`,
+                    );
 
                     const retryTasksData = readTasks(tasksPath);
                     const feedbackPrefix = `[REVIEW FEEDBACK]: ${reviewResult.issues.join("; ")}`;
 
                     for (const tid of tasksToReset) {
-                      const idx = retryTasksData.tasks.findIndex(t => t.id === tid);
+                      const idx = retryTasksData.tasks.findIndex(
+                        (t) => t.id === tid,
+                      );
                       if (idx !== -1) {
                         retryTasksData.tasks[idx].status = "pending";
                         retryTasksData.tasks[idx].started_at = null;
                         retryTasksData.tasks[idx].completed_at = null;
                         retryTasksData.tasks[idx].error = null;
                         // Append review feedback to task-{id}.md if it exists [REQ-01]
-                        const taskMdPath = join(dirname(tasksPath), `task-${tid}.md`);
-                        const feedbackAppended = appendReviewFeedback(taskMdPath, reviewResult.issues);
+                        const taskMdPath = join(
+                          dirname(tasksPath),
+                          `task-${tid}.md`,
+                        );
+                        const feedbackAppended = appendReviewFeedback(
+                          taskMdPath,
+                          reviewResult.issues,
+                        );
 
                         // Fall back to tasks.json description feedback if no .md file [REQ-04]
                         if (!feedbackAppended) {
-                          if (!retryTasksData.tasks[idx].description.startsWith("[REVIEW FEEDBACK]:")) {
-                            retryTasksData.tasks[idx].description = `${feedbackPrefix}\n\n${retryTasksData.tasks[idx].description}`;
+                          if (
+                            !retryTasksData.tasks[idx].description.startsWith(
+                              "[REVIEW FEEDBACK]:",
+                            )
+                          ) {
+                            retryTasksData.tasks[idx].description =
+                              `${feedbackPrefix}\n\n${retryTasksData.tasks[idx].description}`;
                           } else {
                             // Replace existing feedback with latest
-                            retryTasksData.tasks[idx].description = retryTasksData.tasks[idx].description.replace(
-                              /^\[REVIEW FEEDBACK\]:.*?\n\n/s,
-                              `${feedbackPrefix}\n\n`
-                            );
+                            retryTasksData.tasks[idx].description =
+                              retryTasksData.tasks[idx].description.replace(
+                                /^\[REVIEW FEEDBACK\]:.*?\n\n/s,
+                                `${feedbackPrefix}\n\n`,
+                              );
                           }
                         }
 
@@ -1422,18 +1722,29 @@ export async function main() {
                           event: "reset",
                           task_id: tid,
                           plan_slug: planSlugForReview,
-                          specialist: retryTasksData.tasks[idx].specialist || null,
+                          specialist:
+                            retryTasksData.tasks[idx].specialist || null,
                           status: "reset",
                           duration_ms: null,
-                          resets: countResetsForTask(projectRoot, tid, planSlugForReview) + 1,
+                          resets:
+                            countResetsForTask(
+                              projectRoot,
+                              tid,
+                              planSlugForReview,
+                            ) + 1,
                           files: retryTasksData.tasks[idx].files,
                           workstream: ws,
                           title: retryTasksData.tasks[idx].title,
                         });
                       }
                     }
-                    writeFileSync(tasksPath, JSON.stringify(retryTasksData, null, 2));
-                    console.log(`   Tasks reset with review feedback — loop will re-execute them`);
+                    writeFileSync(
+                      tasksPath,
+                      JSON.stringify(retryTasksData, null, 2),
+                    );
+                    console.log(
+                      `   Tasks reset with review feedback — loop will re-execute them`,
+                    );
                   }
 
                   // If all affected tasks are escalated, mark workstream as done retrying
@@ -1449,52 +1760,75 @@ export async function main() {
               running = false;
             }
           } else {
-            const remaining = tasks.tasks.filter(t => 
-              t.status === "pending" && (!workstream || t.workstream === workstream)
+            const remaining = tasks.tasks.filter(
+              (t) =>
+                t.status === "pending" &&
+                (!workstream || t.workstream === workstream),
             );
-            
+
             if (remaining.length > 0) {
               console.log("\n⏳ Waiting for dependencies...");
-              
+
               const depsFromOtherWs = new Set<string>();
-              
+
               for (const t of remaining) {
                 const deps = t.depends_on || [];
                 if (deps.length > 0) {
-                  const depTasks = deps.map(depId => {
-                    const dep = tasks.tasks.find(task => task.id === depId);
+                  const depTasks = deps.map((depId) => {
+                    const dep = tasks.tasks.find((task) => task.id === depId);
                     const ws = dep?.workstream || depId;
                     const status = dep?.status || "unknown";
-                    const icon = status === "completed" ? "✓" : status === "in_progress" ? "◐" : "○";
+                    const icon =
+                      status === "completed"
+                        ? "✓"
+                        : status === "in_progress"
+                          ? "◐"
+                          : "○";
                     if (ws !== workstream && status !== "completed") {
                       depsFromOtherWs.add(ws);
                     }
                     return `${icon} ${depId} (${ws})`;
                   });
-                  console.log(`   ${t.id}: waiting on [${depTasks.join(", ")}]`);
+                  console.log(
+                    `   ${t.id}: waiting on [${depTasks.join(", ")}]`,
+                  );
                 } else {
-                  console.log(`   ${t.id}: ${t.title} (no dependencies, but blocked)`);
+                  console.log(
+                    `   ${t.id}: ${t.title} (no dependencies, but blocked)`,
+                  );
                 }
               }
-              
+
               if (depsFromOtherWs.size > 0) {
-                console.log(`\n⚠️  Waiting on tasks from workstream(s): ${[...depsFromOtherWs].join(", ")}`);
+                console.log(
+                  `\n⚠️  Waiting on tasks from workstream(s): ${[...depsFromOtherWs].join(", ")}`,
+                );
                 console.log("   These will NOT be auto-run. Either:");
-                console.log("   • Run 'bart run' without --workstream to run all workstreams");
-                console.log("   • Run 'bart run --workstream <X>' for each workstream in order");
+                console.log(
+                  "   • Run 'bart run' without --workstream to run all workstreams",
+                );
+                console.log(
+                  "   • Run 'bart run --workstream <X>' for each workstream in order",
+                );
                 console.log("   • Manually run the dependent tasks first");
-                
-                await sendTelegram(formatWorkstreamBlocked(workstream || "unknown", [...depsFromOtherWs]));
-                
+
+                await sendTelegram(
+                  formatWorkstreamBlocked(workstream || "unknown", [
+                    ...depsFromOtherWs,
+                  ]),
+                );
+
                 running = false;
                 continue;
               }
-              
-              console.log("\n🔄 Checking every 5 seconds for dependency resolution...");
-              
+
+              console.log(
+                "\n🔄 Checking every 5 seconds for dependency resolution...",
+              );
+
               let waited = 0;
               while (waited < 120) {
-                await new Promise(resolve => setTimeout(resolve, 5000));
+                await new Promise((resolve) => setTimeout(resolve, 5000));
                 waited += 5;
 
                 // Check for stop signal during wait
@@ -1507,48 +1841,62 @@ export async function main() {
 
                 const checkTasks = readTasks(tasksPath);
                 const checkNext = findNextTask(checkTasks, workstream);
-                
+
                 if (checkNext) {
                   console.log("\n✅ Dependencies resolved! Continuing...");
                   break;
                 }
-                
-                const newRemaining = checkTasks.tasks.filter(t => 
-                  t.status === "pending" && (!workstream || t.workstream === workstream)
+
+                const newRemaining = checkTasks.tasks.filter(
+                  (t) =>
+                    t.status === "pending" &&
+                    (!workstream || t.workstream === workstream),
                 );
-                
+
                 if (newRemaining.length === 0) {
                   console.log("\n📋 No more pending tasks.");
                   running = false;
                   break;
                 }
-                
-                const inProgress = checkTasks.tasks.filter(t => t.status === "in_progress");
+
+                const inProgress = checkTasks.tasks.filter(
+                  (t) => t.status === "in_progress",
+                );
                 if (inProgress.length > 0) {
-                  console.log(`\n⏳ Waiting... (${waited}s) [${inProgress[0].id}: ${inProgress[0].title}]`);
+                  console.log(
+                    `\n⏳ Waiting... (${waited}s) [${inProgress[0].id}: ${inProgress[0].title}]`,
+                  );
                 } else {
                   console.log(`\n⏳ Waiting... (${waited}s)`);
                 }
               }
-              
+
               if (waited >= 120) {
                 console.log("\n⏰ Timeout reached (2 minutes). Stopping.");
                 running = false;
               }
               continue;
             } else {
-              const inThisWs = tasks.tasks.filter(t => t.workstream === workstream);
+              const inThisWs = tasks.tasks.filter(
+                (t) => t.workstream === workstream,
+              );
               if (inThisWs.length > 0) {
-                const completed = inThisWs.filter(t => t.status === "completed").length;
-                console.log(`\n⚠️  No tasks can run in workstream ${workstream}`);
+                const completed = inThisWs.filter(
+                  (t) => t.status === "completed",
+                ).length;
+                console.log(
+                  `\n⚠️  No tasks can run in workstream ${workstream}`,
+                );
                 console.log(`   Completed: ${completed}/${inThisWs.length}`);
-                const pending = inThisWs.filter(t => t.status === "pending");
+                const pending = inThisWs.filter((t) => t.status === "pending");
                 if (pending.length > 0) {
                   console.log(`   Pending but blocked:`);
                   for (const t of pending) {
                     const deps = t.depends_on || [];
                     if (deps.length > 0) {
-                      console.log(`     - ${t.id}: depends on ${deps.join(", ")}`);
+                      console.log(
+                        `     - ${t.id}: depends on ${deps.join(", ")}`,
+                      );
                     }
                   }
                 }
@@ -1559,19 +1907,23 @@ export async function main() {
             }
           }
         }
-        
+
         const finalTasks = readTasks(tasksPath);
-        const relevantTasks = finalTasks.tasks.filter(t =>
-          !workstream || t.workstream === workstream
+        const relevantTasks = finalTasks.tasks.filter(
+          (t) => !workstream || t.workstream === workstream,
         );
-        const allDone = relevantTasks.every(t =>
-          t.status === "completed" || t.status === "needs_escalation"
+        const allDone = relevantTasks.every(
+          (t) => t.status === "completed" || t.status === "needs_escalation",
         );
-        const escalated = relevantTasks.filter(t => t.status === "needs_escalation");
+        const escalated = relevantTasks.filter(
+          (t) => t.status === "needs_escalation",
+        );
         if (allDone && escalated.length === 0) {
           console.log("\n🎉 All tasks completed!");
         } else if (allDone && escalated.length > 0) {
-          console.log(`\n⚠️  Run complete. ${escalated.length} task(s) need manual intervention:`);
+          console.log(
+            `\n⚠️  Run complete. ${escalated.length} task(s) need manual intervention:`,
+          );
           for (const t of escalated) {
             console.log(`   🚨 ${t.id}: ${t.title}`);
           }
@@ -1585,7 +1937,10 @@ export async function main() {
         if (existsSync(bartDir)) {
           const specialists = discoverSpecialists(cwd);
           const summaryPath = join(bartDir, "specialists.md");
-          writeFileSync(summaryPath, generateSpecialistsSummary(specialists, cwd));
+          writeFileSync(
+            summaryPath,
+            generateSpecialistsSummary(specialists, cwd),
+          );
         }
 
         releaseLock(cwd);
@@ -1599,8 +1954,12 @@ export async function main() {
       }
       const stopPath = join(bartDir, STOP_FILE);
       writeFileSync(stopPath, new Date().toISOString());
-      console.log("⛔ Stop signal sent. Bart will stop after the current task finishes.");
-      console.log("   (The running agent will be allowed to complete its current task cleanly.)");
+      console.log(
+        "⛔ Stop signal sent. Bart will stop after the current task finishes.",
+      );
+      console.log(
+        "   (The running agent will be allowed to complete its current task cleanly.)",
+      );
       break;
     }
 
@@ -1612,14 +1971,22 @@ export async function main() {
         process.stdout.write(generateBashCompletion());
       } else if (subcommand === "install") {
         const shellEnv = process.env.SHELL || "";
-        const detectedShell = shellEnv.includes("zsh") ? "zsh" : shellEnv.includes("bash") ? "bash" : "";
+        const detectedShell = shellEnv.includes("zsh")
+          ? "zsh"
+          : shellEnv.includes("bash")
+            ? "bash"
+            : "";
         if (!detectedShell) {
-          console.error("Could not detect shell from $SHELL. Use 'bart completions zsh' or 'bart completions bash' instead.");
+          console.error(
+            "Could not detect shell from $SHELL. Use 'bart completions zsh' or 'bart completions bash' instead.",
+          );
           process.exit(1);
         }
         console.log(`\nInstalling ${detectedShell} completions...`);
         await installCompletions(detectedShell);
-        console.log(`\n✅ ${detectedShell} completions installed. Restart your shell or run 'source ~/.${detectedShell}rc' to activate.`);
+        console.log(
+          `\n✅ ${detectedShell} completions installed. Restart your shell or run 'source ~/.${detectedShell}rc' to activate.`,
+        );
       } else {
         console.log("Usage: bart completions <zsh|bash|install>");
         console.log("  zsh     Output zsh completion script to stdout");
@@ -1638,12 +2005,21 @@ export async function main() {
 
       // Auto-discover skills: root SKILL.md + all subdirectories under skills/
       const skills: { src: string; dir: string; name: string }[] = [
-        { src: join(packageRoot, "SKILL.md"), dir: join(claudeSkillsDir, "bart-loop"), name: "bart-loop" },
+        {
+          src: join(packageRoot, "SKILL.md"),
+          dir: join(claudeSkillsDir, "bart-loop"),
+          name: "bart-loop",
+        },
       ];
       const skillsSrcDir = join(packageRoot, "skills");
       if (existsSync(skillsSrcDir)) {
-        for (const entry of readdirSync(skillsSrcDir, { withFileTypes: true })) {
-          if (entry.isDirectory() && existsSync(join(skillsSrcDir, entry.name, "SKILL.md"))) {
+        for (const entry of readdirSync(skillsSrcDir, {
+          withFileTypes: true,
+        })) {
+          if (
+            entry.isDirectory() &&
+            existsSync(join(skillsSrcDir, entry.name, "SKILL.md"))
+          ) {
             skills.push({
               src: join(skillsSrcDir, entry.name, "SKILL.md"),
               dir: join(claudeSkillsDir, entry.name),
@@ -1666,7 +2042,9 @@ export async function main() {
       }
 
       if (installed > 0) {
-        console.log(`\n🎉 ${installed} skill(s) installed to ${claudeSkillsDir}`);
+        console.log(
+          `\n🎉 ${installed} skill(s) installed to ${claudeSkillsDir}`,
+        );
       } else {
         console.error("\n❌ No skills found to install.");
         process.exit(1);
@@ -1674,11 +2052,17 @@ export async function main() {
 
       // Also install shell completions
       const shellEnv = process.env.SHELL || "";
-      const detectedShell = shellEnv.includes("zsh") ? "zsh" : shellEnv.includes("bash") ? "bash" : "";
+      const detectedShell = shellEnv.includes("zsh")
+        ? "zsh"
+        : shellEnv.includes("bash")
+          ? "bash"
+          : "";
       if (detectedShell) {
         console.log(`\nInstalling ${detectedShell} completions...`);
         await installCompletions(detectedShell);
-        console.log(`✅ Shell completions installed. Restart your shell or run 'source ~/.${detectedShell}rc' to activate.`);
+        console.log(
+          `✅ Shell completions installed. Restart your shell or run 'source ~/.${detectedShell}rc' to activate.`,
+        );
       }
       break;
     }
@@ -1700,10 +2084,17 @@ export async function main() {
 
       // Add .bart to .gitignore if not already present
       const gitignorePath = join(cwd, ".gitignore");
-      let gitignoreContent = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
-      const hasEntry = gitignoreContent.split("\n").some(line => line.trim() === ".bart" || line.trim() === ".bart/");
+      let gitignoreContent = existsSync(gitignorePath)
+        ? readFileSync(gitignorePath, "utf-8")
+        : "";
+      const hasEntry = gitignoreContent
+        .split("\n")
+        .some((line) => line.trim() === ".bart" || line.trim() === ".bart/");
       if (!hasEntry) {
-        const newline = gitignoreContent.length > 0 && !gitignoreContent.endsWith("\n") ? "\n" : "";
+        const newline =
+          gitignoreContent.length > 0 && !gitignoreContent.endsWith("\n")
+            ? "\n"
+            : "";
         writeFileSync(gitignorePath, gitignoreContent + newline + ".bart\n");
         console.log(`Added .bart to .gitignore`);
       } else {
@@ -1713,7 +2104,9 @@ export async function main() {
       // Install PostToolUse hook for auto-conversion on plan writes
       const claudeHooksDir = join(cwd, ".claude", "hooks");
       const hookDest = join(claudeHooksDir, "bart-post-plan.sh");
-      const initPackageRoot = dirname(dirname(new URL(import.meta.url).pathname));
+      const initPackageRoot = dirname(
+        dirname(new URL(import.meta.url).pathname),
+      );
       const hookSrc = join(initPackageRoot, "hooks", "bart-post-plan.sh");
 
       if (existsSync(hookSrc)) {
@@ -1726,7 +2119,9 @@ export async function main() {
         const settingsPath = join(cwd, ".claude", "settings.json");
         let settings: Record<string, any> = {};
         if (existsSync(settingsPath)) {
-          try { settings = JSON.parse(readFileSync(settingsPath, "utf-8")); } catch {}
+          try {
+            settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+          } catch {}
         }
 
         // Ensure hooks.PostToolUse exists
@@ -1735,9 +2130,10 @@ export async function main() {
 
         // Check if our hook is already registered
         const hookCommand = ".claude/hooks/bart-post-plan.sh";
-        const alreadyInstalled = settings.hooks.PostToolUse.some((entry: any) =>
-          entry.matcher === "Write" &&
-          entry.hooks?.some((h: any) => h.command === hookCommand)
+        const alreadyInstalled = settings.hooks.PostToolUse.some(
+          (entry: any) =>
+            entry.matcher === "Write" &&
+            entry.hooks?.some((h: any) => h.command === hookCommand),
         );
 
         if (!alreadyInstalled) {
@@ -1746,14 +2142,16 @@ export async function main() {
             hooks: [
               {
                 type: "command",
-                command: hookCommand
-              }
-            ]
+                command: hookCommand,
+              },
+            ],
           });
           writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
           console.log(`Updated .claude/settings.json with PostToolUse hook`);
         } else {
-          console.log(`PostToolUse hook already configured in .claude/settings.json`);
+          console.log(
+            `PostToolUse hook already configured in .claude/settings.json`,
+          );
         }
       } else {
         console.log(`⚠️  Hook source not found: ${hookSrc}`);
@@ -1772,26 +2170,40 @@ export async function main() {
       if (!existsSync(plansDir)) mkdirSync(plansDir, { recursive: true });
 
       // 2. Check skill installed
-      const skillPath = join(process.env.HOME || "", ".claude", "skills", "bart-think", "SKILL.md");
+      const skillPath = join(
+        process.env.HOME || "",
+        ".claude",
+        "skills",
+        "bart-think",
+        "SKILL.md",
+      );
       if (!existsSync(skillPath)) {
-        console.log("⚠️  bart-think skill not found. Run 'bart install' first.");
+        console.log(
+          "⚠️  bart-think skill not found. Run 'bart install' first.",
+        );
         process.exit(1);
       }
 
       console.log("\n🧠 Starting bart-think session...");
-      console.log("This will guide you through structured thinking before planning.\n");
+      console.log(
+        "This will guide you through structured thinking before planning.\n",
+      );
       console.log("Tell the agent what you want to build or solve.");
-      console.log("The bart-think skill will auto-load when you describe your project.\n");
+      console.log(
+        "The bart-think skill will auto-load when you describe your project.\n",
+      );
 
       // Snapshot existing plans before the session
-      const plansBefore = new Set(existsSync(plansDir) ? readdirSync(plansDir) : []);
+      const plansBefore = new Set(
+        existsSync(plansDir) ? readdirSync(plansDir) : [],
+      );
 
       // For think, we launch TUI mode (opencode without 'run') so it's interactive
       // The skill will auto-load based on keywords in the conversation
       const config = loadConfig();
       let thinkCmd: string;
       let thinkArgs: string[];
-      
+
       if (config.agent === "claude") {
         thinkCmd = "claude";
         const prompt = specificTask
@@ -1813,7 +2225,7 @@ export async function main() {
       try {
         const thinkChild = spawn(thinkCmd, thinkArgs, {
           cwd,
-          stdio: "inherit"
+          stdio: "inherit",
         });
 
         await new Promise<void>((resolve) => {
@@ -1827,12 +2239,14 @@ export async function main() {
 
       // After session ends, check if a new plan was written
       const plansAfter = existsSync(plansDir) ? readdirSync(plansDir) : [];
-      const newPlans = plansAfter.filter(p => !plansBefore.has(p));
+      const newPlans = plansAfter.filter((p) => !plansBefore.has(p));
       if (newPlans.length > 0) {
         console.log("\n📋 Plan detected. Converting to tasks...");
         await runPlanCommand(cwd, resolveTasksPath(cwd), undefined, true, true);
       } else {
-        console.log("\nNo plan was generated. Run 'bart think' again when ready.");
+        console.log(
+          "\nNo plan was generated. Run 'bart think' again when ready.",
+        );
       }
       break;
     }
@@ -1843,7 +2257,13 @@ export async function main() {
 
     case "convert":
     case "c":
-      await runPlanCommand(cwd, tasksPath, planFilePath || specificTask, true, args.includes("-y") || args.includes("--yes"));
+      await runPlanCommand(
+        cwd,
+        tasksPath,
+        planFilePath || specificTask,
+        true,
+        args.includes("-y") || args.includes("--yes"),
+      );
       break;
 
     case "plan":
@@ -1858,13 +2278,19 @@ export async function main() {
       setMode(cwd, "planning");
 
       try {
-        await runPlanCommand(cwd, tasksPath, planFilePath, useLatestPlan, autoConfirm);
+        await runPlanCommand(
+          cwd,
+          tasksPath,
+          planFilePath,
+          useLatestPlan,
+          autoConfirm,
+        );
       } finally {
         clearMode(cwd);
       }
       break;
     }
-      
+
     case "requirements":
     case "reqs":
       if (!existsSync(tasksPath)) {
@@ -1881,14 +2307,24 @@ export async function main() {
     case "specialists":
       if (specificTask === "new") {
         // Launch guided specialist creation via bart-new-specialist skill
-        const newSpecSkillPath = join(process.env.HOME || "", ".claude", "skills", "bart-new-specialist", "SKILL.md");
+        const newSpecSkillPath = join(
+          process.env.HOME || "",
+          ".claude",
+          "skills",
+          "bart-new-specialist",
+          "SKILL.md",
+        );
         if (!existsSync(newSpecSkillPath)) {
-          console.log("⚠️  bart-new-specialist skill not found. Run 'bart install' first.");
+          console.log(
+            "⚠️  bart-new-specialist skill not found. Run 'bart install' first.",
+          );
           process.exit(1);
         }
 
         console.log("\n🧑‍🔬 Starting specialist creation session...");
-        console.log("This will guide you through creating a new specialist profile.\n");
+        console.log(
+          "This will guide you through creating a new specialist profile.\n",
+        );
 
         const specConfig = loadConfig();
         let specCmd: string;
@@ -1904,7 +2340,7 @@ export async function main() {
 
         const specChild = spawn(specCmd, specArgs, {
           cwd,
-          stdio: "inherit"
+          stdio: "inherit",
         });
 
         await new Promise<void>((resolve) => {
@@ -1912,14 +2348,24 @@ export async function main() {
         });
       } else if (specificTask === "git") {
         // Launch git-based specialist discovery via bart-specialists-git skill
-        const gitSpecSkillPath = join(process.env.HOME || "", ".claude", "skills", "bart-specialists-git", "SKILL.md");
+        const gitSpecSkillPath = join(
+          process.env.HOME || "",
+          ".claude",
+          "skills",
+          "bart-specialists-git",
+          "SKILL.md",
+        );
         if (!existsSync(gitSpecSkillPath)) {
-          console.log("⚠️  bart-specialists-git skill not found. Run 'bart install' first.");
+          console.log(
+            "⚠️  bart-specialists-git skill not found. Run 'bart install' first.",
+          );
           process.exit(1);
         }
 
         console.log("\n🔍 Starting git standards analysis...");
-        console.log("This will scan PR reviews and commit history to discover engineering standards.\n");
+        console.log(
+          "This will scan PR reviews and commit history to discover engineering standards.\n",
+        );
 
         const gitSpecConfig = loadConfig();
         let gitSpecCmd: string;
@@ -1927,11 +2373,17 @@ export async function main() {
 
         // Pass --since flag through if present
         const sinceIdx = args.indexOf("--since");
-        const sinceArg = sinceIdx !== -1 && args[sinceIdx + 1] ? `--since ${args[sinceIdx + 1]}` : "";
+        const sinceArg =
+          sinceIdx !== -1 && args[sinceIdx + 1]
+            ? `--since ${args[sinceIdx + 1]}`
+            : "";
 
         if (gitSpecConfig.agent === "claude") {
           gitSpecCmd = "claude";
-          gitSpecArgs = ["--dangerously-skip-permissions", `/bart-specialists-git${sinceArg ? " " + sinceArg : ""}`];
+          gitSpecArgs = [
+            "--dangerously-skip-permissions",
+            `/bart-specialists-git${sinceArg ? " " + sinceArg : ""}`,
+          ];
         } else {
           gitSpecCmd = "opencode";
           gitSpecArgs = [];
@@ -1939,7 +2391,7 @@ export async function main() {
 
         const gitSpecChild = spawn(gitSpecCmd, gitSpecArgs, {
           cwd,
-          stdio: "inherit"
+          stdio: "inherit",
         });
 
         await new Promise<void>((resolve) => {
@@ -1953,7 +2405,10 @@ export async function main() {
           const bartDir = join(cwd, BART_DIR);
           if (existsSync(bartDir)) {
             const summaryPath = join(bartDir, "specialists.md");
-            writeFileSync(summaryPath, generateSpecialistsSummary(specialists, cwd));
+            writeFileSync(
+              summaryPath,
+              generateSpecialistsSummary(specialists, cwd),
+            );
             console.log(`  Updated ${summaryPath}\n`);
           }
         } else {
@@ -1967,13 +2422,17 @@ export async function main() {
       const taskDescription = specificTask;
       if (!taskDescription) {
         console.error('Usage: bart suggest "<task description>"');
-        console.error('Example: bart suggest "Add dark mode toggle to settings page"');
+        console.error(
+          'Example: bart suggest "Add dark mode toggle to settings page"',
+        );
         process.exit(1);
       }
 
       const specialists = discoverSpecialists(cwd);
       if (specialists.length === 0) {
-        console.log("\nNo specialists found. Run 'bart install' to install skills.");
+        console.log(
+          "\nNo specialists found. Run 'bart install' to install skills.",
+        );
         process.exit(1);
       }
 
@@ -1982,13 +2441,21 @@ export async function main() {
 
       const history = loadHistory(cwd);
       const model = loadSpecialistModel(cwd);
-      const scored = scoreSpecialists(taskDescription, fileHints, specialists, history, model);
+      const scored = scoreSpecialists(
+        taskDescription,
+        fileHints,
+        specialists,
+        history,
+        model,
+      );
 
       console.log(`\n🔍 Specialist suggestions for: "${taskDescription}"\n`);
 
       if (scored.length === 0) {
         console.log("  No specialists matched this task description.");
-        console.log("  Try adding more detail or check available specialists with 'bart specialists'.\n");
+        console.log(
+          "  Try adding more detail or check available specialists with 'bart specialists'.\n",
+        );
         break;
       }
 
@@ -1996,8 +2463,17 @@ export async function main() {
       for (let i = 0; i < top.length; i++) {
         const { specialist: s, confidence, rationale } = top[i];
         const pct = Math.round(confidence * 100);
-        const bar = "█".repeat(Math.round(pct / 5)) + "░".repeat(20 - Math.round(pct / 5));
-        const typeLabel = s.type === "agent" ? "A" : s.type === "skill" ? "S" : s.type === "profile" ? "P" : "C";
+        const bar =
+          "█".repeat(Math.round(pct / 5)) +
+          "░".repeat(20 - Math.round(pct / 5));
+        const typeLabel =
+          s.type === "agent"
+            ? "A"
+            : s.type === "skill"
+              ? "S"
+              : s.type === "profile"
+                ? "P"
+                : "C";
         console.log(`  ${i + 1}. [${typeLabel}] ${s.name}  ${bar}  ${pct}%`);
         for (const r of rationale) {
           console.log(`     → ${r}`);
@@ -2030,12 +2506,16 @@ export async function main() {
           output: process.stdout,
         });
         const ask = (q: string): Promise<string> =>
-          new Promise((resolve) => rl.question(q, (a: string) => resolve(a.trim())));
+          new Promise((resolve) =>
+            rl.question(q, (a: string) => resolve(a.trim())),
+          );
 
         console.log("\n📱 Telegram Setup");
         console.log("   1. Message @BotFather on Telegram and create a bot");
         console.log("   2. Copy the bot token");
-        console.log("   3. Send a message to your bot, then get your chat ID\n");
+        console.log(
+          "   3. Send a message to your bot, then get your chat ID\n",
+        );
 
         const botToken = await ask("Bot token: ");
         if (!botToken) {
@@ -2058,26 +2538,35 @@ export async function main() {
           config.telegram_bot_token = botToken;
           config.telegram_chat_id = chatId;
           saveConfig(config);
-          console.log("✅ Telegram configured! Check your Telegram for a confirmation message.");
+          console.log(
+            "✅ Telegram configured! Check your Telegram for a confirmation message.",
+          );
         } else {
-          console.error("❌ Test message failed. Check your bot token and chat ID.");
+          console.error(
+            "❌ Test message failed. Check your bot token and chat ID.",
+          );
           process.exit(1);
         }
       } else {
         const config = loadConfig();
-        const tgStatus = config.telegram_bot_token && config.telegram_chat_id
-          ? `configured (chat ${config.telegram_chat_id})`
-          : "(not set)";
+        const tgStatus =
+          config.telegram_bot_token && config.telegram_chat_id
+            ? `configured (chat ${config.telegram_chat_id})`
+            : "(not set)";
         console.log("\n📋 Current config:");
         console.log(`   agent: ${config.agent || "(not set)"}`);
-        console.log(`   auto_continue: ${config.auto_continue !== undefined ? config.auto_continue : "(default: true)"}`);
+        console.log(
+          `   auto_continue: ${config.auto_continue !== undefined ? config.auto_continue : "(default: true)"}`,
+        );
         console.log(`   telegram: ${tgStatus}`);
         console.log(`\nTo set agent: bart config --agent <claude|opencode>`);
-        console.log(`To set auto-continue: bart config --auto-continue (or --no-auto-continue)`);
+        console.log(
+          `To set auto-continue: bart config --auto-continue (or --no-auto-continue)`,
+        );
         console.log(`To setup Telegram: bart config --telegram`);
       }
       break;
-      
+
     case "reset":
       if (!specificTask) {
         console.error("Usage: bart reset <task-id>");
@@ -2088,14 +2577,20 @@ export async function main() {
         process.exit(1);
       }
       const resetTasks = readTasks(tasksPath);
-      const resetTaskIndex = resetTasks.tasks.findIndex(t => t.id === specificTask);
+      const resetTaskIndex = resetTasks.tasks.findIndex(
+        (t) => t.id === specificTask,
+      );
       if (resetTaskIndex === -1) {
         console.error(`Task ${specificTask} not found`);
         process.exit(1);
       }
       const resetTask = resetTasks.tasks[resetTaskIndex];
       const resetPlanSlug = extractPlanSlug(tasksPath);
-      const previousResets = countResetsForTask(cwd, specificTask, resetPlanSlug);
+      const previousResets = countResetsForTask(
+        cwd,
+        specificTask,
+        resetPlanSlug,
+      );
 
       resetTasks.tasks[resetTaskIndex].status = "pending";
       resetTasks.tasks[resetTaskIndex].started_at = null;
@@ -2119,13 +2614,13 @@ export async function main() {
 
       console.log(`✅ Task ${specificTask} reset to pending`);
       break;
-      
+
     case "help":
     case "--help":
     case "-h":
       showHelp();
       break;
-      
+
     default:
       console.log(`Unknown command: ${command}`);
       showHelp();

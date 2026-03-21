@@ -23,7 +23,10 @@ export function verifyToken(token: string, validTokens: string[]): boolean {
  *
  * Auth is disabled when `validTokens` is empty.
  */
-export function authenticate(req: Request, validTokens: string[]): Response | null {
+export function authenticate(
+  req: Request,
+  validTokens: string[],
+): Response | null {
   // Auth disabled when no tokens are configured
   if (validTokens.length === 0) return null;
 

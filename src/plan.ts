@@ -1,8 +1,19 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  readdirSync,
+  statSync,
+} from "fs";
 import { join } from "path";
 import { Task, Requirement, TestingMetadata } from "./constants.js";
 import { findFile } from "./tasks.js";
-import { discoverSpecialists, matchSpecialist, loadSpecialistModel } from "./specialists.js";
+import {
+  discoverSpecialists,
+  matchSpecialist,
+  loadSpecialistModel,
+} from "./specialists.js";
 import { generateTaskMarkdown } from "./task-gen.js";
 import type { AgentRunner } from "./task-gen.js";
 
@@ -78,7 +89,7 @@ function parseExplicitRequirements(lines: string[]): Requirement[] | null {
           id: match[1],
           description: match[2].trim(),
           covered_by: [],
-          status: "none"
+          status: "none",
         });
       }
     }
@@ -125,10 +136,17 @@ function parseTestingMetadata(lines: string[]): TestingMetadata | null {
 function extractReqReferences(text: string): string[] {
   const matches = text.match(/\[REQ-\w+\]/g);
   if (!matches) return [];
-  return matches.map(m => m.slice(1, -1));
+  return matches.map((m) => m.slice(1, -1));
 }
 
-export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Task[]; requirements: Requirement[]; testing: TestingMetadata | null } {
+export function parsePlanToTasks(
+  planContent: string,
+  cwd: string,
+): {
+  tasks: Task[];
+  requirements: Requirement[];
+  testing: TestingMetadata | null;
+} {
   const lines = planContent.split("\n");
   const tasks: Task[] = [];
   const workstreams = ["A", "B", "C", "D", "E", "F"];
@@ -187,18 +205,26 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
       currentSectionName = sectionTitle;
 
       if (!isExplicitMode && currentSectionName) {
-        const reqId = "REQ-" + currentSectionName.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/-+$/, "");
+        const reqId =
+          "REQ-" +
+          currentSectionName
+            .toUpperCase()
+            .replace(/[^A-Z0-9]+/g, "-")
+            .replace(/-+$/, "");
         if (!autoReqMap.has(reqId)) {
           autoReqMap.set(reqId, {
             id: reqId,
             description: currentSectionName,
             covered_by: [],
-            status: "none"
+            status: "none",
           });
         }
       }
 
-      currentWorkstreamIndex = Math.min(currentWorkstreamIndex + 1, workstreams.length - 1);
+      currentWorkstreamIndex = Math.min(
+        currentWorkstreamIndex + 1,
+        workstreams.length - 1,
+      );
       currentWorkstreamTaskNum = 1;
       sectionTaskCounts[currentWorkstreamIndex] = 0;
     }
@@ -219,7 +245,11 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
       let j = i + 1;
       while (j < lines.length && !lines[j].trim().startsWith("#")) {
         const detailLine = lines[j].trim();
-        if (detailLine && !detailLine.startsWith("-") && !detailLine.startsWith("```")) {
+        if (
+          detailLine &&
+          !detailLine.startsWith("-") &&
+          !detailLine.startsWith("```")
+        ) {
           description += ". " + detailLine;
           break;
         }
@@ -238,7 +268,12 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
         taskReqs = [...new Set(taskReqs)];
       } else if (currentSectionName) {
         // Auto-extract: task inherits parent section's requirement
-        const reqId = "REQ-" + currentSectionName.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/-+$/, "");
+        const reqId =
+          "REQ-" +
+          currentSectionName
+            .toUpperCase()
+            .replace(/[^A-Z0-9]+/g, "-")
+            .replace(/-+$/, "");
         taskReqs = [reqId];
       }
 
@@ -247,15 +282,18 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
         files.push(...extractFiles(lines[k]));
       }
 
-      const lastTaskInSection = sectionTaskCounts[currentWorkstreamIndex] > 0
-        ? `${ws}${sectionTaskCounts[currentWorkstreamIndex]}`
-        : null;
+      const lastTaskInSection =
+        sectionTaskCounts[currentWorkstreamIndex] > 0
+          ? `${ws}${sectionTaskCounts[currentWorkstreamIndex]}`
+          : null;
 
-      const hasDependency = taskTitle.toLowerCase().includes("depend") ||
+      const hasDependency =
+        taskTitle.toLowerCase().includes("depend") ||
         taskTitle.toLowerCase().includes("after") ||
         taskTitle.toLowerCase().includes("requir");
 
-      const depends_on = hasDependency && lastTaskInSection ? [lastTaskInSection] : [];
+      const depends_on =
+        hasDependency && lastTaskInSection ? [lastTaskInSection] : [];
 
       tasks.push({
         id: taskId,
@@ -269,7 +307,7 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
         started_at: null,
         completed_at: null,
         error: null,
-        requirements: taskReqs.length > 0 ? taskReqs : undefined
+        requirements: taskReqs.length > 0 ? taskReqs : undefined,
       });
 
       currentWorkstreamTaskNum++;
@@ -289,7 +327,7 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
       files_modified: [],
       started_at: null,
       completed_at: null,
-      error: null
+      error: null,
     });
   }
 
@@ -305,7 +343,7 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
   for (const task of tasks) {
     if (task.requirements) {
       for (const reqId of task.requirements) {
-        const req = requirements.find(r => r.id === reqId);
+        const req = requirements.find((r) => r.id === reqId);
         if (req && !req.covered_by.includes(task.id)) {
           req.covered_by.push(task.id);
         }
@@ -321,7 +359,10 @@ export function parsePlanToTasks(planContent: string, cwd: string): { tasks: Tas
  * Each block starts at the task's ### heading and ends at the next ### or ## heading.
  * Returns a Map of taskId -> full content string.
  */
-export function extractTaskContentBlocks(planContent: string, tasks: Task[]): Map<string, string> {
+export function extractTaskContentBlocks(
+  planContent: string,
+  tasks: Task[],
+): Map<string, string> {
   const lines = planContent.split("\n");
   const blocks = new Map<string, string>();
 
@@ -360,7 +401,11 @@ export function extractTaskContentBlocks(planContent: string, tasks: Task[]): Ma
         inFenceEnd = !inFenceEnd;
         continue;
       }
-      if (!inFenceEnd && (trimmed.startsWith("### ") || (trimmed.startsWith("## ") && !trimmed.startsWith("### ")))) {
+      if (
+        !inFenceEnd &&
+        (trimmed.startsWith("### ") ||
+          (trimmed.startsWith("## ") && !trimmed.startsWith("### ")))
+      ) {
         endIdx = i;
         break;
       }
@@ -376,13 +421,23 @@ export function extractTaskContentBlocks(planContent: string, tasks: Task[]): Ma
 /**
  * Write each extracted content block to a task-{id}.md file in the plan directory.
  */
-export function writeTaskMarkdownFiles(planDir: string, blocks: Map<string, string>): void {
+export function writeTaskMarkdownFiles(
+  planDir: string,
+  blocks: Map<string, string>,
+): void {
   for (const [taskId, content] of blocks) {
     writeFileSync(join(planDir, `task-${taskId}.md`), content);
   }
 }
 
-export async function runPlanCommand(cwd: string, _tasksPath: string, planPathArg?: string, useLatestPlan?: boolean, autoConfirm?: boolean, agentRunner?: AgentRunner) {
+export async function runPlanCommand(
+  cwd: string,
+  _tasksPath: string,
+  planPathArg?: string,
+  useLatestPlan?: boolean,
+  autoConfirm?: boolean,
+  agentRunner?: AgentRunner,
+) {
   let planPath = planPathArg;
 
   if (!planPath && useLatestPlan) {
@@ -401,7 +456,7 @@ export async function runPlanCommand(cwd: string, _tasksPath: string, planPathAr
     if (planPath && !autoConfirm) {
       const readline = require("readline").createInterface({
         input: process.stdin,
-        output: process.stdout
+        output: process.stdout,
       });
 
       const confirmed = await new Promise<boolean>((resolve) => {
@@ -431,7 +486,7 @@ export async function runPlanCommand(cwd: string, _tasksPath: string, planPathAr
     console.error(`Plan file not found: ${planPath}`);
     process.exit(1);
   }
-  
+
   if (!planPath) {
     console.log(`
 📝 No plan.md found. 
@@ -459,7 +514,7 @@ Example plan.md:
   }
 
   console.log(`\n📋 Found plan: ${planPath}\n`);
-  
+
   const planContent = readFileSync(planPath, "utf-8");
   const { tasks, requirements, testing } = parsePlanToTasks(planContent, cwd);
 
@@ -476,7 +531,9 @@ Example plan.md:
       }
     }
     if (assigned > 0) {
-      console.log(`Specialists: ${assigned} task(s) auto-assigned from ${specialists.length} available specialist(s)`);
+      console.log(
+        `Specialists: ${assigned} task(s) auto-assigned from ${specialists.length} available specialist(s)`,
+      );
     }
   }
 
@@ -485,7 +542,12 @@ Example plan.md:
   // Derive a descriptive name from the plan's first heading or source filename
   const titleMatch = planContent.match(/^#\s+(?:Plan:\s*)?(.+)/m);
   const slug = titleMatch
-    ? titleMatch[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "").slice(0, 60)
+    ? titleMatch[1]
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/-+$/, "")
+        .slice(0, 60)
     : "plan";
   const timestamp = new Date().toISOString().slice(0, 10);
   const planDirName = `${timestamp}-${slug}`;
@@ -503,7 +565,7 @@ Example plan.md:
     project_root: cwd,
     requirements: requirements.length > 0 ? requirements : undefined,
     testing: testing || undefined,
-    tasks
+    tasks,
   };
 
   writeFileSync(planTasksPath, JSON.stringify(tasksData, null, 2));
@@ -520,7 +582,7 @@ Example plan.md:
       let specialistPremises: string | undefined;
       let testExpectations: string[] | undefined;
       if (task.specialist) {
-        const specialist = specialists.find(s => s.name === task.specialist);
+        const specialist = specialists.find((s) => s.name === task.specialist);
         if (specialist) {
           specialistPremises = specialist.premises;
           testExpectations = specialist.test_expectations;
@@ -547,17 +609,17 @@ Example plan.md:
 
   console.log(`✅ Generated ${tasks.length} tasks in ${planTasksPath}\n`);
 
-  const workstreams = [...new Set(tasks.map(t => t.workstream))].sort();
+  const workstreams = [...new Set(tasks.map((t) => t.workstream))].sort();
   console.log("Workstreams:");
   for (const ws of workstreams) {
-    const wsTasks = tasks.filter(t => t.workstream === ws);
+    const wsTasks = tasks.filter((t) => t.workstream === ws);
     console.log(`  ${ws}: ${wsTasks.length} tasks`);
   }
 
   if (requirements.length > 0) {
-    const covered = requirements.filter(r => r.covered_by.length > 0).length;
+    const covered = requirements.filter((r) => r.covered_by.length > 0).length;
     console.log(`\nRequirements: ${covered}/${requirements.length} covered`);
-    const uncovered = requirements.filter(r => r.covered_by.length === 0);
+    const uncovered = requirements.filter((r) => r.covered_by.length === 0);
     if (uncovered.length > 0) {
       console.log("  Uncovered:");
       for (const r of uncovered) {

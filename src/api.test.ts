@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createServer } from "./api.js";
 import type { TasksData } from "./constants.js";
-import type { Server } from "bun";
+type ApiServer = ReturnType<typeof createServer>;
 
 // --- Helpers ---
 
@@ -92,7 +92,7 @@ describe("createServer", () => {
 // =============================================================================
 
 describe("GET /tasks", () => {
-  let server: Server;
+  let server: ApiServer;
   let baseUrl: string;
 
   beforeAll(() => {
@@ -157,7 +157,7 @@ describe("GET /tasks", () => {
 // =============================================================================
 
 describe("GET /tasks/:id", () => {
-  let server: Server;
+  let server: ApiServer;
   let baseUrl: string;
 
   beforeAll(() => {
@@ -193,7 +193,7 @@ describe("GET /tasks/:id", () => {
 // =============================================================================
 
 describe("GET /progress", () => {
-  let server: Server;
+  let server: ApiServer;
   let baseUrl: string;
 
   beforeAll(() => {
@@ -223,7 +223,7 @@ describe("GET /progress", () => {
 // =============================================================================
 
 describe("GET /requirements", () => {
-  let server: Server;
+  let server: ApiServer;
   let baseUrl: string;
 
   beforeAll(() => {
@@ -263,7 +263,7 @@ describe("GET /requirements", () => {
 // =============================================================================
 
 describe("unknown routes", () => {
-  let server: Server;
+  let server: ApiServer;
   let baseUrl: string;
 
   beforeAll(() => {

@@ -1,7 +1,12 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
-import { parseStandardsFile, loadStandards, resolveStandards, StandardsFileError } from "./standards.js";
+import {
+  parseStandardsFile,
+  loadStandards,
+  resolveStandards,
+  StandardsFileError,
+} from "./standards.js";
 
 // =============================================================================
 // parseStandardsFile
@@ -215,7 +220,10 @@ describe("loadStandards", () => {
 
   test("handles malformed/empty standards files gracefully", () => {
     writeFileSync(join(globalDir, ".bart", "standards.md"), "");
-    writeFileSync(join(projectDir, ".bart", "standards.md"), "no headings here");
+    writeFileSync(
+      join(projectDir, ".bart", "standards.md"),
+      "no headings here",
+    );
 
     const result = loadStandards(projectDir);
     expect(result).toEqual([]);

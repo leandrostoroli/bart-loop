@@ -1,6 +1,20 @@
-import { existsSync, readFileSync, readdirSync, statSync, appendFileSync, mkdirSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  appendFileSync,
+  mkdirSync,
+  writeFileSync,
+} from "fs";
 import { join, basename, extname } from "path";
-import { Specialist, Task, HistoryEntry, HISTORY_FILE, BART_DIR } from "./constants.js";
+import {
+  Specialist,
+  Task,
+  HistoryEntry,
+  HISTORY_FILE,
+  BART_DIR,
+} from "./constants.js";
 
 const HOME = process.env.HOME || "";
 const SPECIALISTS_DIR = "specialists";
@@ -12,9 +26,9 @@ const MIN_SAMPLES_FOR_TRUST = 5;
 
 /** Features extracted from a task for matching purposes. */
 export interface TaskFeatures {
-  extensions: string[];   // e.g. [".ts", ".tsx", ".css"]
-  keywords: string[];     // significant words from title + description
-  complexity: number;     // file count as a proxy for complexity
+  extensions: string[]; // e.g. [".ts", ".tsx", ".css"]
+  keywords: string[]; // significant words from title + description
+  complexity: number; // file count as a proxy for complexity
   workstream: string;
 }
 
@@ -43,7 +57,7 @@ export function extractTaskFeatures(task: Task): TaskFeatures {
   const keywords = (task.title + " " + task.description)
     .toLowerCase()
     .split(/\W+/)
-    .filter(w => w.length > 3 && !STOP_WORDS.has(w));
+    .filter((w) => w.length > 3 && !STOP_WORDS.has(w));
   const uniqueKeywords = [...new Set(keywords)];
 
   return {
@@ -56,12 +70,50 @@ export function extractTaskFeatures(task: Task): TaskFeatures {
 
 /** Common stop words to exclude from keyword extraction. */
 const STOP_WORDS = new Set([
-  "this", "that", "with", "from", "have", "will", "should", "would",
-  "could", "into", "been", "also", "then", "than", "when", "where",
-  "which", "what", "there", "their", "about", "each", "other",
-  "them", "these", "those", "some", "more", "most", "only",
-  "very", "just", "make", "like", "well", "back", "even", "still",
-  "after", "before", "does", "done", "such", "much",
+  "this",
+  "that",
+  "with",
+  "from",
+  "have",
+  "will",
+  "should",
+  "would",
+  "could",
+  "into",
+  "been",
+  "also",
+  "then",
+  "than",
+  "when",
+  "where",
+  "which",
+  "what",
+  "there",
+  "their",
+  "about",
+  "each",
+  "other",
+  "them",
+  "these",
+  "those",
+  "some",
+  "more",
+  "most",
+  "only",
+  "very",
+  "just",
+  "make",
+  "like",
+  "well",
+  "back",
+  "even",
+  "still",
+  "after",
+  "before",
+  "does",
+  "done",
+  "such",
+  "much",
 ]);
 
 /** Load the specialist model from .bart/specialist-model.json. */
@@ -112,7 +164,7 @@ function featureSimilarity(a: TaskFeatures, b: TaskFeatures): number {
   if (a.extensions.length > 0 || b.extensions.length > 0) {
     const setA = new Set(a.extensions);
     const setB = new Set(b.extensions);
-    const intersection = [...setA].filter(x => setB.has(x)).length;
+    const intersection = [...setA].filter((x) => setB.has(x)).length;
     const union = new Set([...setA, ...setB]).size;
     score += union > 0 ? intersection / union : 0;
     factors++;
@@ -122,7 +174,7 @@ function featureSimilarity(a: TaskFeatures, b: TaskFeatures): number {
   if (a.keywords.length > 0 || b.keywords.length > 0) {
     const setA = new Set(a.keywords);
     const setB = new Set(b.keywords);
-    const intersection = [...setA].filter(x => setB.has(x)).length;
+    const intersection = [...setA].filter((x) => setB.has(x)).length;
     const union = new Set([...setA, ...setB]).size;
     score += union > 0 ? intersection / union : 0;
     factors++;
@@ -131,7 +183,7 @@ function featureSimilarity(a: TaskFeatures, b: TaskFeatures): number {
   // Complexity proximity (1.0 when equal, decays with distance)
   const maxComplexity = Math.max(a.complexity, b.complexity, 1);
   const complexityDiff = Math.abs(a.complexity - b.complexity);
-  score += 1 - (complexityDiff / maxComplexity);
+  score += 1 - complexityDiff / maxComplexity;
   factors++;
 
   return factors > 0 ? score / factors : 0;
@@ -149,11 +201,11 @@ export function modelConfidence(
   specialistName: string,
   taskFeatures: TaskFeatures,
 ): { confidence: number; sampleCount: number; rationale: string } | null {
-  const entries = model.entries.filter(e => e.specialist === specialistName);
+  const entries = model.entries.filter((e) => e.specialist === specialistName);
   if (entries.length < MIN_SAMPLES_FOR_TRUST) return null;
 
   // 1. Overall success rate for this specialist
-  const successes = entries.filter(e => e.success).length;
+  const successes = entries.filter((e) => e.success).length;
   const successRate = successes / entries.length;
 
   // 2. Feature-weighted success rate (weight by similarity to current task)
@@ -165,7 +217,8 @@ export function modelConfidence(
     weightedSuccess += weight * (entry.success ? 1 : 0);
     totalWeight += weight;
   }
-  const weightedRate = totalWeight > 0 ? weightedSuccess / totalWeight : successRate;
+  const weightedRate =
+    totalWeight > 0 ? weightedSuccess / totalWeight : successRate;
 
   // 3. Combined confidence: 40% global success rate + 60% feature-weighted rate
   const confidence = 0.4 * successRate + 0.6 * weightedRate;
@@ -285,18 +338,23 @@ export function parseProfile(filePath: string): Specialist | null {
   const skills = toList(fm.skills);
   const standards = toList(fm.standards);
   const agents = toList(fm.agents);
-  const test_expectations = toList(fm.test_expectations || fm["test-expectations"]);
+  const test_expectations = toList(
+    fm.test_expectations || fm["test-expectations"],
+  );
   const role = typeof fm.role === "string" ? fm.role.trim() : undefined;
-  const description = typeof fm.description === "string"
-    ? fm.description.split("\n")[0].trim()
-    : (role || "");
+  const description =
+    typeof fm.description === "string"
+      ? fm.description.split("\n")[0].trim()
+      : role || "";
   const tools = fm.tools || fm["allowed-tools"];
 
   // Extract body content after frontmatter
   const body = content.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
 
   // Extract ## Premises section content (explicit heading)
-  const premisesMatch = body.match(/^## Premises\s*\n([\s\S]*?)(?=\n## |\s*$)/m);
+  const premisesMatch = body.match(
+    /^## Premises\s*\n([\s\S]*?)(?=\n## |\s*$)/m,
+  );
   let premises: string | undefined;
   if (premisesMatch) {
     premises = premisesMatch[1].trim() || undefined;
@@ -317,7 +375,7 @@ export function parseProfile(filePath: string): Specialist | null {
     const entryBlocks = learningsSection
       .replace(/^## Learnings\s*\n?/, "")
       .split(/\n(?=- )/)
-      .map(e => e.trim())
+      .map((e) => e.trim())
       .filter(Boolean);
     learnings.push(...entryBlocks);
   }
@@ -328,13 +386,18 @@ export function parseProfile(filePath: string): Specialist | null {
     type: "profile",
     path: filePath,
     role,
-    tools: Array.isArray(tools) ? tools : tools ? tools.split(/,\s*/) : undefined,
+    tools: Array.isArray(tools)
+      ? tools
+      : tools
+        ? tools.split(/,\s*/)
+        : undefined,
     skills: skills.length > 0 ? skills : undefined,
     standards: standards.length > 0 ? standards : undefined,
     agents: agents.length > 0 ? agents : undefined,
     premises,
     learnings: learnings.length > 0 ? learnings : undefined,
-    test_expectations: test_expectations.length > 0 ? test_expectations : undefined,
+    test_expectations:
+      test_expectations.length > 0 ? test_expectations : undefined,
   };
 }
 
@@ -374,7 +437,10 @@ function scanDirectory(dir: string, type: Specialist["type"]): Specialist[] {
       const fullPath = join(dir, entry);
       const stat = statSync(fullPath);
 
-      if (stat.isFile() && (entry.endsWith(".md") || entry.endsWith(".skill"))) {
+      if (
+        stat.isFile() &&
+        (entry.endsWith(".md") || entry.endsWith(".skill"))
+      ) {
         const content = readFileSync(fullPath, "utf-8");
         const fm = parseFrontmatter(content);
         const name = fm.name || basename(entry, extname(entry));
@@ -384,10 +450,17 @@ function scanDirectory(dir: string, type: Specialist["type"]): Specialist[] {
           const tools = fm.tools || fm["allowed-tools"];
           specialists.push({
             name,
-            description: typeof description === "string" ? description.split("\n")[0].trim() : String(description),
+            description:
+              typeof description === "string"
+                ? description.split("\n")[0].trim()
+                : String(description),
             type,
             path: fullPath,
-            tools: Array.isArray(tools) ? tools : tools ? tools.split(/,\s*/) : undefined,
+            tools: Array.isArray(tools)
+              ? tools
+              : tools
+                ? tools.split(/,\s*/)
+                : undefined,
           });
         }
       }
@@ -418,7 +491,10 @@ function scanPluginDir(pluginDir: string, specialists: Specialist[]) {
         const name = fm.name || skillName;
         specialists.push({
           name,
-          description: typeof fm.description === "string" ? fm.description.split("\n")[0].trim() : "",
+          description:
+            typeof fm.description === "string"
+              ? fm.description.split("\n")[0].trim()
+              : "",
           type: "skill",
           path: skillFile,
           tools: fm["allowed-tools"] || fm.tools || undefined,
@@ -436,7 +512,10 @@ function scanPluginDir(pluginDir: string, specialists: Specialist[]) {
     if (name) {
       specialists.push({
         name,
-        description: typeof fm.description === "string" ? fm.description.split("\n")[0].trim() : "",
+        description:
+          typeof fm.description === "string"
+            ? fm.description.split("\n")[0].trim()
+            : "",
         type: "skill",
         path: rootSkill,
         tools: fm["allowed-tools"] || fm.tools || undefined,
@@ -484,7 +563,12 @@ function scanPlugins(pluginsDir: string): Specialist[] {
 
       // Flat structure: marketplaces/<name>/<subdir>/ with .claude-plugin or skills/agents/commands
       for (const entry of readdirSync(mpDir)) {
-        if (entry === "plugins" || entry.startsWith(".") || entry === "node_modules") continue;
+        if (
+          entry === "plugins" ||
+          entry.startsWith(".") ||
+          entry === "node_modules"
+        )
+          continue;
         const subDir = join(mpDir, entry);
         if (!statSync(subDir).isDirectory()) continue;
 
@@ -495,7 +579,13 @@ function scanPlugins(pluginsDir: string): Specialist[] {
         const hasCommands = existsSync(join(subDir, "commands"));
         const hasRootSkill = existsSync(join(subDir, "SKILL.md"));
 
-        if (hasPlugin || hasSkills || hasAgents || hasCommands || hasRootSkill) {
+        if (
+          hasPlugin ||
+          hasSkills ||
+          hasAgents ||
+          hasCommands ||
+          hasRootSkill
+        ) {
           scanPluginDir(subDir, specialists);
         }
       }
@@ -524,21 +614,36 @@ export function discoverSpecialists(cwd?: string): Specialist[] {
   };
 
   // 0. Project-local specialist profiles (.bart/specialists/*.md) — highest dedup priority
-  for (const s of scanProfileDirectory(join(projectRoot, BART_DIR, SPECIALISTS_DIR))) add(s);
+  for (const s of scanProfileDirectory(
+    join(projectRoot, BART_DIR, SPECIALISTS_DIR),
+  ))
+    add(s);
   // 0b. Global specialist profiles (~/.bart/specialists/*.md) — shadowed by project-local profiles
-  for (const s of scanProfileDirectory(join(HOME, BART_DIR, SPECIALISTS_DIR))) add(s);
+  for (const s of scanProfileDirectory(join(HOME, BART_DIR, SPECIALISTS_DIR)))
+    add(s);
   // 1. Project-local commands
-  for (const s of scanDirectory(join(projectRoot, ".claude", "commands"), "command")) add(s);
+  for (const s of scanDirectory(
+    join(projectRoot, ".claude", "commands"),
+    "command",
+  ))
+    add(s);
   // 2. Project-local agents
-  for (const s of scanDirectory(join(projectRoot, ".claude", "agents"), "agent")) add(s);
+  for (const s of scanDirectory(
+    join(projectRoot, ".claude", "agents"),
+    "agent",
+  ))
+    add(s);
   // 3. Global commands
-  for (const s of scanDirectory(join(HOME, ".claude", "commands"), "command")) add(s);
+  for (const s of scanDirectory(join(HOME, ".claude", "commands"), "command"))
+    add(s);
   // 4. Global agents
-  for (const s of scanDirectory(join(HOME, ".claude", "agents"), "agent")) add(s);
+  for (const s of scanDirectory(join(HOME, ".claude", "agents"), "agent"))
+    add(s);
   // 5. Plugin skills, agents, commands
   for (const s of scanPlugins(join(HOME, ".claude", "plugins"))) add(s);
   // 6. Standalone skill files
-  for (const s of scanDirectory(join(HOME, ".claude", "skills"), "skill")) add(s);
+  for (const s of scanDirectory(join(HOME, ".claude", "skills"), "skill"))
+    add(s);
   // 7. ~/.agents/skills/<name>/SKILL.md (shared agent skills)
   const agentsSkillsDir = join(HOME, ".agents", "skills");
   if (existsSync(agentsSkillsDir)) {
@@ -553,7 +658,10 @@ export function discoverSpecialists(cwd?: string): Specialist[] {
           const name = fm.name || skillName;
           add({
             name,
-            description: typeof fm.description === "string" ? fm.description.split("\n")[0].trim() : "",
+            description:
+              typeof fm.description === "string"
+                ? fm.description.split("\n")[0].trim()
+                : "",
             type: "skill",
             path: skillFile,
             tools: fm["allowed-tools"] || fm.tools || undefined,
@@ -597,7 +705,11 @@ const EXT_SKILL_KEYWORDS: Record<string, string[]> = {
  * Score a profile specialist against a task based on declared skills, role, and standards.
  * Returns a numeric score where higher = better match. Used by matchSpecialist tier 2.
  */
-function scoreProfileMatch(profile: Specialist, taskWords: string[], taskExts: Set<string>): number {
+function scoreProfileMatch(
+  profile: Specialist,
+  taskWords: string[],
+  taskExts: Set<string>,
+): number {
   let score = 0;
 
   // Match declared skills against task keywords
@@ -613,7 +725,10 @@ function scoreProfileMatch(profile: Specialist, taskWords: string[], taskExts: S
 
   // Match role against task keywords
   if (profile.role) {
-    const roleWords = profile.role.toLowerCase().split(/\W+/).filter(w => w.length > 2);
+    const roleWords = profile.role
+      .toLowerCase()
+      .split(/\W+/)
+      .filter((w) => w.length > 2);
     for (const rw of roleWords) {
       if (taskWords.includes(rw)) {
         score++;
@@ -634,7 +749,10 @@ function scoreProfileMatch(profile: Specialist, taskWords: string[], taskExts: S
 
   // Match profile name against task keywords
   const nameLower = profile.name.toLowerCase();
-  if (taskWords.includes(nameLower) || taskWords.some(w => nameLower.includes(w) && w.length > 3)) {
+  if (
+    taskWords.includes(nameLower) ||
+    taskWords.some((w) => nameLower.includes(w) && w.length > 3)
+  ) {
     score += 2;
   }
 
@@ -643,12 +761,15 @@ function scoreProfileMatch(profile: Specialist, taskWords: string[], taskExts: S
     const kws = EXT_SKILL_KEYWORDS[ext];
     if (!kws) continue;
     for (const skill of profile.skills || []) {
-      if (kws.some(kw => skill.toLowerCase().includes(kw))) {
+      if (kws.some((kw) => skill.toLowerCase().includes(kw))) {
         score++;
         break;
       }
     }
-    if (profile.role && kws.some(kw => profile.role!.toLowerCase().includes(kw))) {
+    if (
+      profile.role &&
+      kws.some((kw) => profile.role!.toLowerCase().includes(kw))
+    ) {
       score++;
     }
   }
@@ -656,26 +777,32 @@ function scoreProfileMatch(profile: Specialist, taskWords: string[], taskExts: S
   return score;
 }
 
-export function matchSpecialist(task: Task, specialists: Specialist[], model?: SpecialistModel): Specialist | null {
+export function matchSpecialist(
+  task: Task,
+  specialists: Specialist[],
+  model?: SpecialistModel,
+): Specialist | null {
   if (specialists.length === 0) return null;
 
   // 1. Explicit tag: [specialist-name] in title — always 100% confidence
   const tagMatch = task.title.match(/\[([^\]]+)\]/);
   if (tagMatch) {
     const tagName = tagMatch[1].toLowerCase();
-    const found = specialists.find(s => s.name.toLowerCase() === tagName);
+    const found = specialists.find((s) => s.name.toLowerCase() === tagName);
     if (found) return found;
   }
 
   // 2. Profile-aware matching [REQ-06]: prefer curated profiles over auto-discovered specialists.
   //    Check profile skills, role, standards, and name against task keywords and file extensions.
-  const profiles = specialists.filter(s => s.type === "profile");
+  const profiles = specialists.filter((s) => s.type === "profile");
   if (profiles.length > 0) {
     const taskWords = (task.title + " " + task.description)
       .toLowerCase()
       .split(/\W+/)
-      .filter(w => w.length > 2);
-    const taskExts = new Set((task.files || []).map(f => extname(f).toLowerCase()).filter(Boolean));
+      .filter((w) => w.length > 2);
+    const taskExts = new Set(
+      (task.files || []).map((f) => extname(f).toLowerCase()).filter(Boolean),
+    );
 
     let bestProfile: Specialist | null = null;
     let bestProfileScore = 0;
@@ -708,7 +835,10 @@ export function matchSpecialist(task: Task, specialists: Specialist[], model?: S
       }
     }
 
-    if (bestModelMatch && bestModelConfidence * 100 >= AUTO_MATCH_CONFIDENCE_THRESHOLD) {
+    if (
+      bestModelMatch &&
+      bestModelConfidence * 100 >= AUTO_MATCH_CONFIDENCE_THRESHOLD
+    ) {
       return bestModelMatch;
     }
   }
@@ -734,7 +864,7 @@ export function matchSpecialist(task: Task, specialists: Specialist[], model?: S
   for (const file of taskFiles) {
     for (const [ext, keywords] of Object.entries(extKeywords)) {
       if (file.endsWith(ext)) {
-        keywords.forEach(k => fileKeywords.add(k));
+        keywords.forEach((k) => fileKeywords.add(k));
       }
     }
   }
@@ -765,13 +895,16 @@ export function matchSpecialist(task: Task, specialists: Specialist[], model?: S
   const taskWords = (task.title + " " + task.description)
     .toLowerCase()
     .split(/\W+/)
-    .filter(w => w.length > 3);
+    .filter((w) => w.length > 3);
 
   let bestMatch: Specialist | null = null;
   let bestScore = 0;
 
   for (const s of specialists) {
-    const descWords = s.description.toLowerCase().split(/\W+/).filter(w => w.length > 3);
+    const descWords = s.description
+      .toLowerCase()
+      .split(/\W+/)
+      .filter((w) => w.length > 3);
     let score = 0;
     for (const word of taskWords) {
       if (descWords.includes(word)) score++;
@@ -783,9 +916,10 @@ export function matchSpecialist(task: Task, specialists: Specialist[], model?: S
   }
 
   if (bestMatch && bestScore >= 2) {
-    const confidence = taskWords.length > 0
-      ? Math.round((bestScore / taskWords.length) * 100)
-      : 0;
+    const confidence =
+      taskWords.length > 0
+        ? Math.round((bestScore / taskWords.length) * 100)
+        : 0;
     if (confidence >= AUTO_MATCH_CONFIDENCE_THRESHOLD) return bestMatch;
   }
 
@@ -799,8 +933,12 @@ export function printSpecialists(specialists: Specialist[]) {
   if (specialists.length === 0) {
     console.log("\nNo specialists found.");
     console.log("Specialists are discovered from:");
-    console.log("  .bart/specialists/     Project-local profiles (highest priority)");
-    console.log("  ~/.bart/specialists/   Global profiles (shadowed by project-local)");
+    console.log(
+      "  .bart/specialists/     Project-local profiles (highest priority)",
+    );
+    console.log(
+      "  ~/.bart/specialists/   Global profiles (shadowed by project-local)",
+    );
     console.log("  ./.claude/commands/    Project-local commands");
     console.log("  ./.claude/agents/      Project-local agents");
     console.log("  ~/.claude/commands/    Global commands");
@@ -815,25 +953,31 @@ export function printSpecialists(specialists: Specialist[]) {
 
   const typeIcon = (t: Specialist["type"]) => {
     switch (t) {
-      case "agent": return "A";
-      case "skill": return "S";
-      case "command": return "C";
-      case "profile": return "P";
+      case "agent":
+        return "A";
+      case "skill":
+        return "S";
+      case "command":
+        return "C";
+      case "profile":
+        return "P";
     }
   };
 
   for (const s of specialists) {
     const icon = typeIcon(s.type);
-    const desc = s.description.length > 60
-      ? s.description.substring(0, 57) + "..."
-      : s.description;
+    const desc =
+      s.description.length > 60
+        ? s.description.substring(0, 57) + "..."
+        : s.description;
     console.log(`  [${icon}] ${s.name}`);
     console.log(`      ${desc}`);
     if (s.type === "profile") {
       const skillsCount = (s.skills || []).length + (s.agents || []).length;
       const learningsCount = (s.learnings || []).length;
       const meta: string[] = [];
-      if (skillsCount > 0) meta.push(`${skillsCount} skill${skillsCount !== 1 ? "s" : ""}`);
+      if (skillsCount > 0)
+        meta.push(`${skillsCount} skill${skillsCount !== 1 ? "s" : ""}`);
       meta.push(`${learningsCount} learning${learningsCount !== 1 ? "s" : ""}`);
       console.log(`      ${meta.join(", ")}`);
     }
@@ -850,7 +994,7 @@ export interface SpecialistStats {
   completed: number;
   errored: number;
   avg_duration_ms: number | null;
-  reset_rate: number;       // resets / total (0.0 - 1.0)
+  reset_rate: number; // resets / total (0.0 - 1.0)
   total_resets: number;
 }
 
@@ -899,10 +1043,15 @@ export function loadHistory(cwd: string): HistoryEntry[] {
 /**
  * Count the number of reset events for a specific task+plan combination.
  */
-export function countResetsForTask(cwd: string, taskId: string, planSlug: string): number {
+export function countResetsForTask(
+  cwd: string,
+  taskId: string,
+  planSlug: string,
+): number {
   const entries = loadHistory(cwd);
   return entries.filter(
-    e => e.event === "reset" && e.task_id === taskId && e.plan_slug === planSlug
+    (e) =>
+      e.event === "reset" && e.task_id === taskId && e.plan_slug === planSlug,
   ).length;
 }
 
@@ -910,15 +1059,28 @@ export function countResetsForTask(cwd: string, taskId: string, planSlug: string
  * Count distinct tasks that are currently errored in a workstream+plan combination.
  * Excludes tasks that were later completed (reset + completed cycle).
  */
-export function countWorkstreamErrors(cwd: string, workstream: string, planSlug: string): number {
+export function countWorkstreamErrors(
+  cwd: string,
+  workstream: string,
+  planSlug: string,
+): number {
   const entries = loadHistory(cwd);
   const erroredTasks = new Set(
     entries
-      .filter(e => e.event === "error" && e.workstream === workstream && e.plan_slug === planSlug)
-      .map(e => e.task_id)
+      .filter(
+        (e) =>
+          e.event === "error" &&
+          e.workstream === workstream &&
+          e.plan_slug === planSlug,
+      )
+      .map((e) => e.task_id),
   );
   for (const entry of entries) {
-    if (entry.event === "completed" && entry.workstream === workstream && entry.plan_slug === planSlug) {
+    if (
+      entry.event === "completed" &&
+      entry.workstream === workstream &&
+      entry.plan_slug === planSlug
+    ) {
       erroredTasks.delete(entry.task_id);
     }
   }
@@ -929,30 +1091,48 @@ export function countWorkstreamErrors(cwd: string, workstream: string, planSlug:
  * Count the number of review_fail events for a workstream+plan combination.
  * This tracks how many times the workstream review has failed and tasks were retried.
  */
-export function countWorkstreamReviewFailures(cwd: string, workstream: string, planSlug: string): number {
+export function countWorkstreamReviewFailures(
+  cwd: string,
+  workstream: string,
+  planSlug: string,
+): number {
   const entries = loadHistory(cwd);
   return entries.filter(
-    e => e.event === "review_fail" && e.workstream === workstream && e.plan_slug === planSlug
+    (e) =>
+      e.event === "review_fail" &&
+      e.workstream === workstream &&
+      e.plan_slug === planSlug,
   ).length;
 }
 
 /**
  * Aggregate per-specialist performance stats from history entries.
  */
-export function computeSpecialistStats(entries: HistoryEntry[]): SpecialistStats[] {
-  const map = new Map<string, {
-    total: number;
-    completed: number;
-    errored: number;
-    durations: number[];
-    resets: number;
-  }>();
+export function computeSpecialistStats(
+  entries: HistoryEntry[],
+): SpecialistStats[] {
+  const map = new Map<
+    string,
+    {
+      total: number;
+      completed: number;
+      errored: number;
+      durations: number[];
+      resets: number;
+    }
+  >();
 
   for (const e of entries) {
     const name = e.specialist || "(default agent)";
 
     if (!map.has(name)) {
-      map.set(name, { total: 0, completed: 0, errored: 0, durations: [], resets: 0 });
+      map.set(name, {
+        total: 0,
+        completed: 0,
+        errored: 0,
+        durations: [],
+        resets: 0,
+      });
     }
     const stats = map.get(name)!;
 
@@ -971,9 +1151,10 @@ export function computeSpecialistStats(entries: HistoryEntry[]): SpecialistStats
   const result: SpecialistStats[] = [];
   for (const [name, data] of map) {
     const total = data.total;
-    const avg = data.durations.length > 0
-      ? data.durations.reduce((a, b) => a + b, 0) / data.durations.length
-      : null;
+    const avg =
+      data.durations.length > 0
+        ? data.durations.reduce((a, b) => a + b, 0) / data.durations.length
+        : null;
     result.push({
       name,
       total,
@@ -997,7 +1178,9 @@ export function printSpecialistHistory(cwd: string): void {
   const entries = loadHistory(cwd);
   if (entries.length === 0) {
     console.log("\nNo execution history found.");
-    console.log("History is recorded when tasks are completed, errored, or reset.\n");
+    console.log(
+      "History is recorded when tasks are completed, errored, or reset.\n",
+    );
     return;
   }
 
@@ -1006,7 +1189,7 @@ export function printSpecialistHistory(cwd: string): void {
   console.log(`\nExecution History (${entries.length} events):\n`);
 
   // Header
-  const nameW = Math.max(20, ...stats.map(s => s.name.length)) + 2;
+  const nameW = Math.max(20, ...stats.map((s) => s.name.length)) + 2;
   const header = [
     "Specialist".padEnd(nameW),
     "Done".padStart(5),
@@ -1020,7 +1203,8 @@ export function printSpecialistHistory(cwd: string): void {
 
   for (const s of stats) {
     const resetPct = s.total > 0 ? `${Math.round(s.reset_rate * 100)}%` : "—";
-    const avgTime = s.avg_duration_ms != null ? formatDuration(s.avg_duration_ms) : "—";
+    const avgTime =
+      s.avg_duration_ms != null ? formatDuration(s.avg_duration_ms) : "—";
     const row = [
       s.name.padEnd(nameW),
       String(s.completed).padStart(5),
@@ -1036,8 +1220,8 @@ export function printSpecialistHistory(cwd: string): void {
 
 export interface ScoredSpecialist {
   specialist: Specialist;
-  confidence: number;   // 0.0 - 1.0
-  rationale: string[];  // reasons contributing to the score
+  confidence: number; // 0.0 - 1.0
+  rationale: string[]; // reasons contributing to the score
 }
 
 /**
@@ -1060,7 +1244,7 @@ export function scoreSpecialists(
   const taskWords = description
     .toLowerCase()
     .split(/\W+/)
-    .filter(w => w.length > 3);
+    .filter((w) => w.length > 3);
 
   // File extension → keyword sets
   const extKeywords: Record<string, string[]> = {
@@ -1082,13 +1266,16 @@ export function scoreSpecialists(
   for (const file of files) {
     for (const [ext, keywords] of Object.entries(extKeywords)) {
       if (file.endsWith(ext)) {
-        keywords.forEach(k => fileKeywords.add(k));
+        keywords.forEach((k) => fileKeywords.add(k));
       }
     }
   }
 
   // Build history stats per specialist
-  const historyStats = new Map<string, { completed: number; errored: number; avgMs: number | null }>();
+  const historyStats = new Map<
+    string,
+    { completed: number; errored: number; avgMs: number | null }
+  >();
   if (history && history.length > 0) {
     for (const e of history) {
       const name = e.specialist || "";
@@ -1123,7 +1310,7 @@ export function scoreSpecialists(
     let score = 0;
     const rationale: string[] = [];
     const descLower = s.description.toLowerCase();
-    const descWords = descLower.split(/\W+/).filter(w => w.length > 3);
+    const descWords = descLower.split(/\W+/).filter((w) => w.length > 3);
 
     // 1. Keyword overlap between task description and specialist description
     let kwOverlap = 0;
@@ -1137,7 +1324,9 @@ export function scoreSpecialists(
     if (kwOverlap > 0) {
       const kwScore = Math.min(kwOverlap * 0.12, 0.5);
       score += kwScore;
-      rationale.push(`${kwOverlap} keyword match${kwOverlap > 1 ? "es" : ""}: ${matchedWords.slice(0, 5).join(", ")}`);
+      rationale.push(
+        `${kwOverlap} keyword match${kwOverlap > 1 ? "es" : ""}: ${matchedWords.slice(0, 5).join(", ")}`,
+      );
     }
 
     // 2. File extension heuristic match
@@ -1166,15 +1355,19 @@ export function scoreSpecialists(
 
     // 4. History-based scoring
     const stats = historyStats.get(s.name);
-    if (stats && (stats.completed + stats.errored) > 0) {
+    if (stats && stats.completed + stats.errored > 0) {
       const total = stats.completed + stats.errored;
       const successRate = stats.completed / total;
       if (total >= 3 && successRate >= 0.8) {
         score += 0.15;
-        rationale.push(`Strong track record: ${stats.completed}/${total} tasks succeeded`);
+        rationale.push(
+          `Strong track record: ${stats.completed}/${total} tasks succeeded`,
+        );
       } else if (total >= 3 && successRate < 0.5) {
         score -= 0.1;
-        rationale.push(`Poor track record: ${stats.completed}/${total} tasks succeeded`);
+        rationale.push(
+          `Poor track record: ${stats.completed}/${total} tasks succeeded`,
+        );
       } else if (total > 0) {
         rationale.push(`History: ${stats.completed}/${total} completed`);
       }
@@ -1187,20 +1380,27 @@ export function scoreSpecialists(
 
     // 6. Profile skills/role matching [REQ-06]: boost profiles whose declared metadata matches the task
     if (s.type === "profile") {
-      const taskExts = new Set(files.map(f => extname(f).toLowerCase()).filter(Boolean));
+      const taskExts = new Set(
+        files.map((f) => extname(f).toLowerCase()).filter(Boolean),
+      );
       const profileScore = scoreProfileMatch(s, taskWords, taskExts);
       if (profileScore > 0) {
         const profileBoost = Math.min(profileScore * 0.08, 0.3);
         score += profileBoost;
-        rationale.push(`Profile match: ${profileScore} signal${profileScore > 1 ? "s" : ""} from skills/role/standards`);
+        rationale.push(
+          `Profile match: ${profileScore} signal${profileScore > 1 ? "s" : ""} from skills/role/standards`,
+        );
       }
     }
 
     // 7. ML model-based scoring [REQ-02]: learned task-specialist pairings
     if (model && model.entries.length > 0) {
       const taskFeatures: TaskFeatures = {
-        extensions: [...new Set(files.map(f => extname(f)).filter(Boolean))],
-        keywords: description.toLowerCase().split(/\W+/).filter(w => w.length > 3 && !STOP_WORDS.has(w)),
+        extensions: [...new Set(files.map((f) => extname(f)).filter(Boolean))],
+        keywords: description
+          .toLowerCase()
+          .split(/\W+/)
+          .filter((w) => w.length > 3 && !STOP_WORDS.has(w)),
         complexity: files.length,
         workstream: "",
       };
@@ -1258,16 +1458,18 @@ export function appendProfileLearning(
 
   // Find the specialist's profile path
   const specialists = discoverSpecialists(cwd);
-  const specialist = specialists.find(s => s.name === task.specialist);
+  const specialist = specialists.find((s) => s.name === task.specialist);
   if (!specialist || !specialist.path) return;
   if (!existsSync(specialist.path)) return;
 
   const date = new Date().toISOString().split("T")[0];
   const status = outcome.success ? "success" : "error";
-  const duration = outcome.durationMs != null ? formatDuration(outcome.durationMs) : "n/a";
-  const files = outcome.filesModified.length > 0
-    ? outcome.filesModified.map(f => `\`${f}\``).join(", ")
-    : "none";
+  const duration =
+    outcome.durationMs != null ? formatDuration(outcome.durationMs) : "n/a";
+  const files =
+    outcome.filesModified.length > 0
+      ? outcome.filesModified.map((f) => `\`${f}\``).join(", ")
+      : "none";
 
   const entryLines: string[] = [
     `- **${date}** | ${task.title} | ${status} | ${duration} | Files: ${files}`,
@@ -1289,7 +1491,8 @@ export function appendProfileLearning(
     const match = content.match(/^## Learnings\n*/m);
     if (match && match.index != null) {
       const insertPos = match.index + match[0].length;
-      content = content.slice(0, insertPos) + entry + "\n" + content.slice(insertPos);
+      content =
+        content.slice(0, insertPos) + entry + "\n" + content.slice(insertPos);
     }
   } else {
     // Append a new ## Learnings section at the end
@@ -1299,7 +1502,6 @@ export function appendProfileLearning(
 
   writeFileSync(specialist.path, content);
 }
-
 
 /**
  * Resolve rich prompt context for a specialist, including profile premises,
@@ -1315,7 +1517,10 @@ export function appendProfileLearning(
  * For non-profile specialists, falls back to description.
  * Returns a formatted string suitable for injection into the agent prompt.
  */
-export function resolveProfileContext(specialist: Specialist, allSpecialists?: Specialist[]): string {
+export function resolveProfileContext(
+  specialist: Specialist,
+  allSpecialists?: Specialist[],
+): string {
   const lines: string[] = [];
   lines.push(`Specialist: ${specialist.name} (${specialist.type})`);
 
@@ -1332,7 +1537,10 @@ export function resolveProfileContext(specialist: Specialist, allSpecialists?: S
       // Resolve referenced skills [REQ-03]
       const skillNames = profile.skills || [];
       if (skillNames.length > 0 && allSpecialists) {
-        const resolvedSkills = resolveReferencedSpecialists(skillNames, allSpecialists);
+        const resolvedSkills = resolveReferencedSpecialists(
+          skillNames,
+          allSpecialists,
+        );
         if (resolvedSkills.length > 0) {
           lines.push("");
           lines.push("## Skills");
@@ -1347,7 +1555,10 @@ export function resolveProfileContext(specialist: Specialist, allSpecialists?: S
       // Resolve referenced agents [REQ-03]
       const agentNames = profile.agents || [];
       if (agentNames.length > 0 && allSpecialists) {
-        const resolvedAgents = resolveReferencedSpecialists(agentNames, allSpecialists);
+        const resolvedAgents = resolveReferencedSpecialists(
+          agentNames,
+          allSpecialists,
+        );
         if (resolvedAgents.length > 0) {
           lines.push("");
           lines.push("## Agents");
@@ -1390,7 +1601,7 @@ function resolveReferencedSpecialists(
 
   for (const refName of names) {
     const match = allSpecialists.find(
-      s => s.name.toLowerCase() === refName.toLowerCase(),
+      (s) => s.name.toLowerCase() === refName.toLowerCase(),
     );
     if (!match || !match.path || !existsSync(match.path)) continue;
 
@@ -1413,7 +1624,10 @@ function resolveReferencedSpecialists(
  * Print a board view of specialists grouped by effectiveness.
  * Groups: Effective (>=80% success, low resets), Needs Attention (<80% or high resets), Untested (<3 tasks).
  */
-export function printSpecialistBoard(specialists: Specialist[], cwd: string): void {
+export function printSpecialistBoard(
+  specialists: Specialist[],
+  cwd: string,
+): void {
   const entries = loadHistory(cwd);
   const statsMap = new Map<string, SpecialistStats>();
   if (entries.length > 0) {
@@ -1433,9 +1647,21 @@ export function printSpecialistBoard(specialists: Specialist[], cwd: string): vo
   }
 
   // Categorize specialists
-  const effective: { s: Specialist; stats: SpecialistStats; last: string | null }[] = [];
-  const needsAttention: { s: Specialist; stats: SpecialistStats; last: string | null }[] = [];
-  const untested: { s: Specialist; stats: SpecialistStats | null; last: string | null }[] = [];
+  const effective: {
+    s: Specialist;
+    stats: SpecialistStats;
+    last: string | null;
+  }[] = [];
+  const needsAttention: {
+    s: Specialist;
+    stats: SpecialistStats;
+    last: string | null;
+  }[] = [];
+  const untested: {
+    s: Specialist;
+    stats: SpecialistStats | null;
+    last: string | null;
+  }[] = [];
 
   for (const s of specialists) {
     const stats = statsMap.get(s.name);
@@ -1456,10 +1682,14 @@ export function printSpecialistBoard(specialists: Specialist[], cwd: string): vo
 
   const typeIcon = (t: Specialist["type"]) => {
     switch (t) {
-      case "agent": return "A";
-      case "skill": return "S";
-      case "command": return "C";
-      case "profile": return "P";
+      case "agent":
+        return "A";
+      case "skill":
+        return "S";
+      case "command":
+        return "C";
+      case "profile":
+        return "P";
     }
   };
 
@@ -1479,14 +1709,24 @@ export function printSpecialistBoard(specialists: Specialist[], cwd: string): vo
     const skillsCount = (s.skills || []).length + (s.agents || []).length;
     const learningsCount = (s.learnings || []).length;
     const parts: string[] = [];
-    if (skillsCount > 0) parts.push(`${skillsCount} skill${skillsCount !== 1 ? "s" : ""}`);
+    if (skillsCount > 0)
+      parts.push(`${skillsCount} skill${skillsCount !== 1 ? "s" : ""}`);
     parts.push(`${learningsCount} learning${learningsCount !== 1 ? "s" : ""}`);
     return parts.join(", ");
   };
 
-  const printRow = (s: Specialist, done: string, rate: string, avgTime: string, resets: string, last: string) => {
+  const printRow = (
+    s: Specialist,
+    done: string,
+    rate: string,
+    avgTime: string,
+    resets: string,
+    last: string,
+  ) => {
     const type = typeIcon(s.type);
-    console.log(`  [${type}] ${s.name.padEnd(24)} ${done.padStart(5)}  ${rate.padStart(6)}  ${avgTime.padStart(9)}  ${resets.padStart(7)}  ${last.padStart(8)}`);
+    console.log(
+      `  [${type}] ${s.name.padEnd(24)} ${done.padStart(5)}  ${rate.padStart(6)}  ${avgTime.padStart(9)}  ${resets.padStart(7)}  ${last.padStart(8)}`,
+    );
     const meta = getProfileMeta(s);
     if (meta) {
       console.log(`        ${meta}`);
@@ -1494,7 +1734,9 @@ export function printSpecialistBoard(specialists: Specialist[], cwd: string): vo
   };
 
   const printHeader = () => {
-    console.log(`  ${"".padEnd(4)}${"Name".padEnd(24)} ${"Done".padStart(5)}  ${"Rate".padStart(6)}  ${"Avg Time".padStart(9)}  ${"Resets".padStart(7)}  ${"Last".padStart(8)}`);
+    console.log(
+      `  ${"".padEnd(4)}${"Name".padEnd(24)} ${"Done".padStart(5)}  ${"Rate".padStart(6)}  ${"Avg Time".padStart(9)}  ${"Resets".padStart(7)}  ${"Last".padStart(8)}`,
+    );
     console.log(`  ${"─".repeat(72)}`);
   };
 
@@ -1505,8 +1747,18 @@ export function printSpecialistBoard(specialists: Specialist[], cwd: string): vo
     printHeader();
     for (const { s, stats, last } of effective) {
       const rate = `${Math.round((stats.completed / stats.total) * 100)}%`;
-      const avgTime = stats.avg_duration_ms != null ? formatDuration(stats.avg_duration_ms) : "—";
-      printRow(s, String(stats.completed), rate, avgTime, String(stats.total_resets), formatLast(last));
+      const avgTime =
+        stats.avg_duration_ms != null
+          ? formatDuration(stats.avg_duration_ms)
+          : "—";
+      printRow(
+        s,
+        String(stats.completed),
+        rate,
+        avgTime,
+        String(stats.total_resets),
+        formatLast(last),
+      );
     }
     console.log("");
   }
@@ -1515,9 +1767,22 @@ export function printSpecialistBoard(specialists: Specialist[], cwd: string): vo
     console.log(`  Needs Attention (${needsAttention.length}):`);
     printHeader();
     for (const { s, stats, last } of needsAttention) {
-      const rate = stats.total > 0 ? `${Math.round((stats.completed / stats.total) * 100)}%` : "—";
-      const avgTime = stats.avg_duration_ms != null ? formatDuration(stats.avg_duration_ms) : "—";
-      printRow(s, String(stats.completed), rate, avgTime, String(stats.total_resets), formatLast(last));
+      const rate =
+        stats.total > 0
+          ? `${Math.round((stats.completed / stats.total) * 100)}%`
+          : "—";
+      const avgTime =
+        stats.avg_duration_ms != null
+          ? formatDuration(stats.avg_duration_ms)
+          : "—";
+      printRow(
+        s,
+        String(stats.completed),
+        rate,
+        avgTime,
+        String(stats.total_resets),
+        formatLast(last),
+      );
     }
     console.log("");
   }
@@ -1527,8 +1792,14 @@ export function printSpecialistBoard(specialists: Specialist[], cwd: string): vo
     printHeader();
     for (const { s, stats, last } of untested) {
       const done = stats ? String(stats.completed) : "0";
-      const rate = stats && stats.total > 0 ? `${Math.round((stats.completed / stats.total) * 100)}%` : "—";
-      const avgTime = stats?.avg_duration_ms != null ? formatDuration(stats.avg_duration_ms) : "—";
+      const rate =
+        stats && stats.total > 0
+          ? `${Math.round((stats.completed / stats.total) * 100)}%`
+          : "—";
+      const avgTime =
+        stats?.avg_duration_ms != null
+          ? formatDuration(stats.avg_duration_ms)
+          : "—";
       const resets = stats ? String(stats.total_resets) : "0";
       printRow(s, done, rate, avgTime, resets, formatLast(last));
     }
@@ -1559,7 +1830,10 @@ function generateRecommendations(
   }
   if (fileExts.size > 0) {
     const sorted = [...fileExts.entries()].sort((a, b) => b[1] - a[1]);
-    const topExts = sorted.slice(0, 3).map(([ext]) => `\`${ext}\``).join(", ");
+    const topExts = sorted
+      .slice(0, 3)
+      .map(([ext]) => `\`${ext}\``)
+      .join(", ");
     recs.push(`Strong with ${topExts} files`);
   }
 
@@ -1574,24 +1848,26 @@ function generateRecommendations(
       recs.push("Use with caution — low success rate, consider alternatives");
     }
     if (stats.avg_duration_ms != null) {
-      if (stats.avg_duration_ms < 60000) recs.push("Fast execution — good for quick tasks");
-      else if (stats.avg_duration_ms > 180000) recs.push("Long execution time — best for complex tasks");
+      if (stats.avg_duration_ms < 60000)
+        recs.push("Fast execution — good for quick tasks");
+      else if (stats.avg_duration_ms > 180000)
+        recs.push("Long execution time — best for complex tasks");
     }
   }
 
   // Keyword-based suggestions from description
   const kwMap: Record<string, string> = {
-    "review": "Use for code review and quality checks",
-    "test": "Use for testing-related tasks",
-    "frontend": "Best for UI and frontend work",
-    "database": "Use for database and schema tasks",
-    "deploy": "Use for deployment and infrastructure tasks",
-    "security": "Use for security audits and vulnerability checks",
-    "refactor": "Use for code refactoring and cleanup",
-    "documentation": "Use for documentation tasks",
-    "hook": "Use for hook and automation development",
-    "plugin": "Use for plugin structure and development",
-    "architecture": "Use for architectural design and planning",
+    review: "Use for code review and quality checks",
+    test: "Use for testing-related tasks",
+    frontend: "Best for UI and frontend work",
+    database: "Use for database and schema tasks",
+    deploy: "Use for deployment and infrastructure tasks",
+    security: "Use for security audits and vulnerability checks",
+    refactor: "Use for code refactoring and cleanup",
+    documentation: "Use for documentation tasks",
+    hook: "Use for hook and automation development",
+    plugin: "Use for plugin structure and development",
+    architecture: "Use for architectural design and planning",
   };
   for (const [kw, rec] of Object.entries(kwMap)) {
     if (descLower.includes(kw) && recs.length < 4) {
@@ -1606,7 +1882,10 @@ function generateRecommendations(
  * Generate .bart/specialists.md summary content.
  * Includes specialist details, performance stats, and usage recommendations.
  */
-export function generateSpecialistsSummary(specialists: Specialist[], cwd: string): string {
+export function generateSpecialistsSummary(
+  specialists: Specialist[],
+  cwd: string,
+): string {
   const entries = loadHistory(cwd);
   const statsMap = new Map<string, SpecialistStats>();
   if (entries.length > 0) {
@@ -1618,7 +1897,9 @@ export function generateSpecialistsSummary(specialists: Specialist[], cwd: strin
   const lines: string[] = [];
   lines.push("# Specialists");
   lines.push("");
-  lines.push(`> Auto-generated summary of ${specialists.length} discovered specialist(s).`);
+  lines.push(
+    `> Auto-generated summary of ${specialists.length} discovered specialist(s).`,
+  );
   lines.push(`> Last updated: ${new Date().toISOString()}`);
   lines.push("");
 
@@ -1635,12 +1916,17 @@ export function generateSpecialistsSummary(specialists: Specialist[], cwd: strin
     const stats = statsMap.get(s.name);
     if (stats && stats.total > 0) {
       const rate = Math.round((stats.completed / stats.total) * 100);
-      const avgTime = stats.avg_duration_ms != null ? formatDuration(stats.avg_duration_ms) : "n/a";
+      const avgTime =
+        stats.avg_duration_ms != null
+          ? formatDuration(stats.avg_duration_ms)
+          : "n/a";
       lines.push("");
       lines.push("**Performance:**");
       lines.push(`| Done | Errors | Success Rate | Avg Time | Resets |`);
       lines.push(`|------|--------|-------------|----------|--------|`);
-      lines.push(`| ${stats.completed} | ${stats.errored} | ${rate}% | ${avgTime} | ${stats.total_resets} |`);
+      lines.push(
+        `| ${stats.completed} | ${stats.errored} | ${rate}% | ${avgTime} | ${stats.total_resets} |`,
+      );
     }
 
     const recs = generateRecommendations(s, stats, entries);

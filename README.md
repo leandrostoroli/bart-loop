@@ -24,12 +24,15 @@ Bart fixes that. It's the automation layer that:
 
 - **Runs your entire project** — One command starts executing all tasks
 - **Enforces TDD** — Every task follows RED-GREEN-REFACTOR with evidence requirements
+- **Generates rich task files** — Each task gets a markdown file with scope, DoD, and tests
 - **Reviews its own work** — Self-review per task, workstream-level review, auto-retry on failure
+- **Persists review feedback** — Rejection reasons saved in task files, creating an audit trail
 - **Handles dependencies** — Waits for cross-workstream deps, notifies when blocked
 - **Works in parallel** — Run multiple workstreams in separate terminals
 - **Routes to specialists** — ML-based matching learns which specialist fits each task
 - **Tracks requirements** — Bidirectional mapping from requirements to tasks with coverage reports
 - **Keeps you informed** — Telegram notifications for completions, errors, and milestones
+- **Exposes a REST API** — Query task status and progress programmatically
 - **Thinks before it plans** — Interactive guided exploration to figure out *what* to build
 
 No more:
@@ -101,9 +104,10 @@ bart run
 
 For each task, bart:
 - Finds the next available task (respecting dependencies)
+- Loads the task's markdown file (`task-{id}.md`) with scope, tests, and Definition of Done
 - Matches and injects the best specialist's context
 - Enforces TDD: write failing test → implement → verify pass
-- Runs self-review: scope compliance, code quality, test evidence
+- Runs self-review against the task's Definition of Done checklist
 - Marks tasks complete and continues
 
 ### 3. Review
@@ -113,7 +117,7 @@ After all tasks in a workstream complete, a dedicated reviewer agent validates:
 - Test coverage — all tasks have tests, critical paths covered
 - Code quality — cross-task consistency, no conflicts
 
-On failure: auto-retry up to 2x with feedback injected. After that: escalate to you.
+On failure: review feedback is persisted directly in `task-{id}.md`, auto-retry up to 2x with feedback injected. After that: escalate to you.
 
 ### 4. Parallelize
 
@@ -126,6 +130,48 @@ bart run --workstream A
 # Terminal 2
 bart run --workstream B
 ```
+
+---
+
+## Task Markdown Files
+
+When you run `bart plan`, bart generates a structured `task-{id}.md` file for each task alongside `tasks.json`. These markdown files give agents richer context than a JSON title and description alone.
+
+Each task file contains:
+
+```markdown
+## Scope
+What the task does and doesn't do.
+
+## Requirements
+Which [REQ-XX] items this task covers.
+
+## Definition of Done
+- [ ] Specific, measurable completion criteria
+- [ ] Used by the self-review gate as a checklist
+
+## Tests
+Expanded test code with setup and assertions.
+```
+
+During execution, bart extracts the **Definition of Done** and injects it into the agent's self-review gate — so the agent verifies each criterion before marking the task done.
+
+When a workstream review rejects a task, feedback is appended to the same file:
+
+```markdown
+## Review Feedback
+
+### Attempt 1 — REJECTED
+- Missing error handling for invalid tokens
+- Test doesn't cover edge case
+
+### Attempt 2 — REJECTED
+- Error handling added but test still incomplete
+
+### Resolved
+```
+
+This creates a full audit trail of review cycles in each task file.
 
 ---
 
@@ -245,6 +291,7 @@ Bart uses a three-layer review system to catch issues before they compound.
 ### Layer 1: Self-Review (Per Task)
 
 Built into every task's execution prompt. The agent checks its own work against:
+- **Definition of Done** — Task-specific acceptance criteria extracted from `task-{id}.md`
 - **Scope compliance** — Is the output within scope? Does it solve the stated problem?
 - **Code quality** — Follows existing patterns, no unnecessary dependencies, minimal changes
 - **TDD evidence** — Tests written first, fail/pass verified with actual output
@@ -262,9 +309,10 @@ Verdict: **PASS** or **FAIL** with specific issues listed.
 ### Layer 3: Auto-Retry & Escalation
 
 When a workstream review fails:
-1. **Retry 1** — Failed tasks re-run with review feedback injected
+1. **Retry 1** — Review feedback persisted in `task-{id}.md`, failed tasks re-run with feedback visible
 2. **Retry 2** — Final attempt with escalation context
 3. **Escalation** — Tasks marked `needs_escalation`, reported to you via Telegram
+4. **Resolved** — When a task passes, a `### Resolved` marker is appended to close the feedback loop
 
 Task statuses: `pending` → `in_progress` → `completed` | `error` | `needs_escalation`
 
@@ -449,6 +497,31 @@ Bart sends notifications for:
 
 ---
 
+## REST API
+
+Bart includes a lightweight HTTP server for querying task status and progress programmatically — useful for dashboards, CI integrations, or external monitoring.
+
+### Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /tasks` | List all tasks (supports `?status=` and `?workstream=` filters) |
+| `GET /tasks/:id` | Get a single task by ID |
+| `GET /progress` | Progress summary: total, completed, in_progress, pending, error |
+| `GET /requirements` | Requirements coverage status |
+
+### Authentication
+
+The API supports optional bearer token authentication. When enabled, all requests must include:
+
+```
+Authorization: Bearer <token>
+```
+
+Auth is disabled by default (no tokens configured). When enabled, unauthenticated requests receive a 401 response.
+
+---
+
 ## Shell Completions
 
 Bart supports tab-completion for zsh and bash, including dynamic completion for plan names, workstreams, and task IDs.
@@ -482,7 +555,10 @@ your-project/
     └── plans/
         └── <date>-<slug>/
             ├── plan.md         # Plan (from think session or converted)
-            └── tasks.json      # Generated tasks
+            ├── tasks.json      # Generated tasks
+            ├── task-A1.md      # Task markdown with scope, DoD, tests
+            ├── task-A2.md
+            └── ...
 ```
 
 ---

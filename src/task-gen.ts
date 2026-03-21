@@ -44,7 +44,7 @@ ${rawContent}
 
 ## Task Requirements
 
-${requirements.length > 0 ? requirements.map(r => `- ${r}`).join("\n") : "No specific requirements tagged for this task."}`;
+${requirements.length > 0 ? requirements.map((r) => `- ${r}`).join("\n") : "No specific requirements tagged for this task."}`;
 
   if (specialistPremises) {
     prompt += `
@@ -61,16 +61,19 @@ ${specialistPremises}`;
 ## Specialist Test Expectations
 
 The specialist requires these test coverage expectations:
-${testExpectations.map(e => `- ${e}`).join("\n")}`;
+${testExpectations.map((e) => `- ${e}`).join("\n")}`;
   }
 
   if (testingMeta) {
     prompt += `
 
 ## Testing Configuration`;
-    if (testingMeta.test_command) prompt += `\nTest command: ${testingMeta.test_command}`;
-    if (testingMeta.framework) prompt += `\nFramework: ${testingMeta.framework}`;
-    if (testingMeta.conventions) prompt += `\nConventions: ${testingMeta.conventions}`;
+    if (testingMeta.test_command)
+      prompt += `\nTest command: ${testingMeta.test_command}`;
+    if (testingMeta.framework)
+      prompt += `\nFramework: ${testingMeta.framework}`;
+    if (testingMeta.conventions)
+      prompt += `\nConventions: ${testingMeta.conventions}`;
   }
 
   prompt += `

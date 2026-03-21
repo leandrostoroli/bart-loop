@@ -421,7 +421,9 @@ async function installZshCompletions(home: string): Promise<void> {
       const after = rcContent.slice(endIdx + MARKER_END.length + 1);
       rcContent = before + buildZshRcBlock() + after;
       writeFileSync(rcFile, rcContent);
-      console.log(`  Updated existing bart-loop completions block in ${rcFile}`);
+      console.log(
+        `  Updated existing bart-loop completions block in ${rcFile}`,
+      );
       return;
     }
   }
@@ -465,7 +467,9 @@ async function installBashCompletions(home: string): Promise<void> {
       const after = rcContent.slice(endIdx + MARKER_END.length + 1);
       rcContent = before + buildBashRcBlock() + after;
       writeFileSync(rcFile, rcContent);
-      console.log(`  Updated existing bart-loop completions block in ${rcFile}`);
+      console.log(
+        `  Updated existing bart-loop completions block in ${rcFile}`,
+      );
       return;
     }
   }
@@ -476,9 +480,9 @@ async function installBashCompletions(home: string): Promise<void> {
 }
 
 function buildBashRcBlock(): string {
-  return [
-    MARKER_START,
-    `source ~/.bart/completions/bart.bash`,
-    MARKER_END,
-  ].join("\n") + "\n";
+  return (
+    [MARKER_START, `source ~/.bart/completions/bart.bash`, MARKER_END].join(
+      "\n",
+    ) + "\n"
+  );
 }

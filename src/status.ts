@@ -3,12 +3,18 @@ import { depsMet, calculateCoverage } from "./tasks.js";
 
 function statusIcon(status: Task["status"]): string {
   switch (status) {
-    case "completed": return "\u2713";
-    case "in_progress": return "\u25D0";
-    case "error": return "\u2717";
-    case "needs_escalation": return "\u26A0";
-    case "pending": return "\u25CB";
-    default: return "?";
+    case "completed":
+      return "\u2713";
+    case "in_progress":
+      return "\u25D0";
+    case "error":
+      return "\u2717";
+    case "needs_escalation":
+      return "\u26A0";
+    case "pending":
+      return "\u25CB";
+    default:
+      return "?";
   }
 }
 
@@ -26,14 +32,18 @@ function formatDuration(start: string | null, end: string | null): string {
 }
 
 export function printStatus(tasks: TasksData) {
-  const workstreams = [...new Set(tasks.tasks.map(t => t.workstream))].sort();
+  const workstreams = [...new Set(tasks.tasks.map((t) => t.workstream))].sort();
 
   const total = tasks.tasks.length;
-  const completed = tasks.tasks.filter(t => t.status === "completed").length;
-  const inProgress = tasks.tasks.filter(t => t.status === "in_progress").length;
-  const errorCount = tasks.tasks.filter(t => t.status === "error").length;
-  const escalated = tasks.tasks.filter(t => t.status === "needs_escalation").length;
-  const pending = tasks.tasks.filter(t => t.status === "pending").length;
+  const completed = tasks.tasks.filter((t) => t.status === "completed").length;
+  const inProgress = tasks.tasks.filter(
+    (t) => t.status === "in_progress",
+  ).length;
+  const errorCount = tasks.tasks.filter((t) => t.status === "error").length;
+  const escalated = tasks.tasks.filter(
+    (t) => t.status === "needs_escalation",
+  ).length;
+  const pending = tasks.tasks.filter((t) => t.status === "pending").length;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   const barLen = 20;
@@ -44,20 +54,27 @@ export function printStatus(tasks: TasksData) {
   const extras = [
     errorCount > 0 ? `${errorCount} failed` : "",
     escalated > 0 ? `${escalated} escalated` : "",
-  ].filter(Boolean).map(s => ` \u2022 ${s}`).join("");
-  console.log(`  [${bar}] ${pct}%  ${completed} done \u2022 ${inProgress} active \u2022 ${pending} pending${extras} (${total} total)\n`);
+  ]
+    .filter(Boolean)
+    .map((s) => ` \u2022 ${s}`)
+    .join("");
+  console.log(
+    `  [${bar}] ${pct}%  ${completed} done \u2022 ${inProgress} active \u2022 ${pending} pending${extras} (${total} total)\n`,
+  );
 
   const reqs = calculateCoverage(tasks);
   if (reqs.length > 0) {
-    const reqComplete = reqs.filter(r => r.status === "complete").length;
-    const reqPartial = reqs.filter(r => r.status === "partial").length;
-    const reqNone = reqs.filter(r => r.status === "none").length;
+    const reqComplete = reqs.filter((r) => r.status === "complete").length;
+    const reqPartial = reqs.filter((r) => r.status === "partial").length;
+    const reqNone = reqs.filter((r) => r.status === "none").length;
     const parts = [`${reqComplete}/${reqs.length} complete`];
     if (reqPartial > 0) parts.push(`${reqPartial} partial`);
     if (reqNone > 0) parts.push(`${reqNone} uncovered`);
     console.log(`  Requirements: ${parts.join(", ")}`);
 
-    const uncovered = reqs.filter(r => r.status === "none" && r.covered_by.length === 0);
+    const uncovered = reqs.filter(
+      (r) => r.status === "none" && r.covered_by.length === 0,
+    );
     if (uncovered.length > 0) {
       for (const r of uncovered) {
         console.log(`    \u25CB ${r.id}: ${r.description}`);
@@ -67,20 +84,24 @@ export function printStatus(tasks: TasksData) {
   }
 
   for (const ws of workstreams) {
-    const wsTasks = tasks.tasks.filter(t => t.workstream === ws);
-    const wsCompleted = wsTasks.filter(t => t.status === "completed").length;
+    const wsTasks = tasks.tasks.filter((t) => t.workstream === ws);
+    const wsCompleted = wsTasks.filter((t) => t.status === "completed").length;
     const wsTotal = wsTasks.length;
     const wsPct = wsTotal > 0 ? Math.round((wsCompleted / wsTotal) * 100) : 0;
 
     const wsFilled = Math.round((wsPct / 100) * 12);
     const wsBar = "\u2588".repeat(wsFilled) + "\u2591".repeat(12 - wsFilled);
 
-    console.log(`Workstream ${ws}: [${wsBar}] ${wsPct}% (${wsCompleted}/${wsTotal})`);
+    console.log(
+      `Workstream ${ws}: [${wsBar}] ${wsPct}% (${wsCompleted}/${wsTotal})`,
+    );
 
     for (const task of wsTasks) {
       const icon = statusIcon(task.status);
       const blocked = task.status === "pending" && !depsMet(tasks, task.id);
-      const duration = task.started_at ? formatDuration(task.started_at, task.completed_at) : "";
+      const duration = task.started_at
+        ? formatDuration(task.started_at, task.completed_at)
+        : "";
       const deps = task.depends_on.length > 0 ? task.depends_on.join(",") : "";
 
       let line = `  ${icon} ${task.id}: ${task.title}`;
@@ -96,7 +117,7 @@ export function printStatus(tasks: TasksData) {
     console.log("");
   }
 
-  const errors = tasks.tasks.filter(t => t.status === "error");
+  const errors = tasks.tasks.filter((t) => t.status === "error");
   if (errors.length > 0) {
     console.log(`\u26A0\uFE0F  Errors (${errors.length}):`);
     for (const e of errors) {
@@ -106,7 +127,9 @@ export function printStatus(tasks: TasksData) {
     console.log("");
   }
 
-  const escalatedTasks = tasks.tasks.filter(t => t.status === "needs_escalation");
+  const escalatedTasks = tasks.tasks.filter(
+    (t) => t.status === "needs_escalation",
+  );
   if (escalatedTasks.length > 0) {
     console.log(`\u26A0  Needs Escalation (${escalatedTasks.length}):`);
     for (const e of escalatedTasks) {
@@ -118,18 +141,20 @@ export function printStatus(tasks: TasksData) {
 }
 
 export function printWorkstreamStatus(tasks: TasksData, workstream: string) {
-  const wsTasks = tasks.tasks.filter(t => t.workstream === workstream);
-  
+  const wsTasks = tasks.tasks.filter((t) => t.workstream === workstream);
+
   if (wsTasks.length === 0) {
     console.log(`\nNo tasks found in workstream ${workstream}\n`);
     return;
   }
-  
-  const completed = wsTasks.filter(t => t.status === "completed").length;
-  const inProgress = wsTasks.filter(t => t.status === "in_progress").length;
-  const errorCount = wsTasks.filter(t => t.status === "error").length;
-  const wsEscalated = wsTasks.filter(t => t.status === "needs_escalation").length;
-  const pending = wsTasks.filter(t => t.status === "pending").length;
+
+  const completed = wsTasks.filter((t) => t.status === "completed").length;
+  const inProgress = wsTasks.filter((t) => t.status === "in_progress").length;
+  const errorCount = wsTasks.filter((t) => t.status === "error").length;
+  const wsEscalated = wsTasks.filter(
+    (t) => t.status === "needs_escalation",
+  ).length;
+  const pending = wsTasks.filter((t) => t.status === "pending").length;
   const total = wsTasks.length;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
@@ -140,13 +165,20 @@ export function printWorkstreamStatus(tasks: TasksData, workstream: string) {
   const wsExtras = [
     errorCount > 0 ? `${errorCount} failed` : "",
     wsEscalated > 0 ? `${wsEscalated} escalated` : "",
-  ].filter(Boolean).map(s => ` \u2022 ${s}`).join("");
-  console.log(`\nWorkstream ${workstream}: [${bar}] ${pct}%  ${completed} done \u2022 ${inProgress} active \u2022 ${pending} pending${wsExtras} (${total} total)\n`);
+  ]
+    .filter(Boolean)
+    .map((s) => ` \u2022 ${s}`)
+    .join("");
+  console.log(
+    `\nWorkstream ${workstream}: [${bar}] ${pct}%  ${completed} done \u2022 ${inProgress} active \u2022 ${pending} pending${wsExtras} (${total} total)\n`,
+  );
 
   for (const task of wsTasks) {
     const icon = statusIcon(task.status);
     const blocked = task.status === "pending" && !depsMet(tasks, task.id);
-    const duration = task.started_at ? formatDuration(task.started_at, task.completed_at) : "";
+    const duration = task.started_at
+      ? formatDuration(task.started_at, task.completed_at)
+      : "";
     const deps = task.depends_on.length > 0 ? task.depends_on.join(",") : "";
 
     let line = `  ${icon} ${task.id}: ${task.title}`;
@@ -159,7 +191,10 @@ export function printWorkstreamStatus(tasks: TasksData, workstream: string) {
       console.log(`      ${task.description.substring(0, 70)}`);
     }
 
-    if ((task.status === "error" || task.status === "needs_escalation") && task.error) {
+    if (
+      (task.status === "error" || task.status === "needs_escalation") &&
+      task.error
+    ) {
       console.log(`      ${task.error.substring(0, 70)}`);
     }
   }
@@ -168,23 +203,31 @@ export function printWorkstreamStatus(tasks: TasksData, workstream: string) {
 
 function reqStatusIcon(status: "none" | "partial" | "complete"): string {
   switch (status) {
-    case "complete": return "\u2713";
-    case "partial": return "\u25D0";
-    case "none": return "\u25CB";
+    case "complete":
+      return "\u2713";
+    case "partial":
+      return "\u25D0";
+    case "none":
+      return "\u25CB";
   }
 }
 
-export function printRequirementsReport(tasks: TasksData, gapsOnly: boolean = false) {
+export function printRequirementsReport(
+  tasks: TasksData,
+  gapsOnly: boolean = false,
+) {
   const reqs = calculateCoverage(tasks);
 
   if (reqs.length === 0) {
-    console.log("\nNo requirements found. Add a ## Requirements section to your plan, or requirements will be auto-generated from ## headings.\n");
+    console.log(
+      "\nNo requirements found. Add a ## Requirements section to your plan, or requirements will be auto-generated from ## headings.\n",
+    );
     return;
   }
 
-  const complete = reqs.filter(r => r.status === "complete").length;
-  const partial = reqs.filter(r => r.status === "partial").length;
-  const none = reqs.filter(r => r.status === "none").length;
+  const complete = reqs.filter((r) => r.status === "complete").length;
+  const partial = reqs.filter((r) => r.status === "partial").length;
+  const none = reqs.filter((r) => r.status === "none").length;
   const pct = reqs.length > 0 ? Math.round((complete / reqs.length) * 100) : 0;
 
   const barLen = 20;
@@ -193,17 +236,24 @@ export function printRequirementsReport(tasks: TasksData, gapsOnly: boolean = fa
 
   console.log(`\n${BART}`);
   console.log(`  Requirements Coverage\n`);
-  console.log(`  [${bar}] ${pct}%  ${complete} complete \u2022 ${partial} partial \u2022 ${none} uncovered (${reqs.length} total)\n`);
+  console.log(
+    `  [${bar}] ${pct}%  ${complete} complete \u2022 ${partial} partial \u2022 ${none} uncovered (${reqs.length} total)\n`,
+  );
 
-  const display = gapsOnly ? reqs.filter(r => r.status !== "complete") : reqs;
+  const display = gapsOnly ? reqs.filter((r) => r.status !== "complete") : reqs;
 
   for (const req of display) {
     const icon = reqStatusIcon(req.status);
-    const color = req.status === "complete" ? "done" : req.status === "partial" ? "partial" : "uncovered";
+    const color =
+      req.status === "complete"
+        ? "done"
+        : req.status === "partial"
+          ? "partial"
+          : "uncovered";
     console.log(`  ${icon} ${req.id}: ${req.description} (${color})`);
     if (req.covered_by.length > 0) {
       for (const taskId of req.covered_by) {
-        const task = tasks.tasks.find(t => t.id === taskId);
+        const task = tasks.tasks.find((t) => t.id === taskId);
         if (task) {
           const taskIcon = statusIcon(task.status);
           console.log(`      ${taskIcon} ${task.id}: ${task.title}`);

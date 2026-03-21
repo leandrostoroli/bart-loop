@@ -132,9 +132,7 @@ describe("depsMet", () => {
   });
 
   test("returns false when a dependency references a non-existent task", () => {
-    const data = makeTasksData([
-      makeTask({ id: "t1", depends_on: ["ghost"] }),
-    ]);
+    const data = makeTasksData([makeTask({ id: "t1", depends_on: ["ghost"] })]);
     expect(depsMet(data, "t1")).toBe(false);
   });
 });
@@ -198,7 +196,12 @@ describe("findNextTask", () => {
   test("returns null when all tasks in workstream are blocked", () => {
     const data = makeTasksData([
       makeTask({ id: "dep1", workstream: "backend", status: "pending" }),
-      makeTask({ id: "t1", workstream: "backend", status: "pending", depends_on: ["dep1"] }),
+      makeTask({
+        id: "t1",
+        workstream: "backend",
+        status: "pending",
+        depends_on: ["dep1"],
+      }),
     ]);
     // dep1 is first pending with no blockers, so it should be returned
     expect(findNextTask(data, "backend")).toBe("dep1");
@@ -223,7 +226,12 @@ describe("findAllReadyTasks", () => {
     const data = makeTasksData([
       makeTask({ id: "t1", workstream: "ws-a", status: "pending" }),
       makeTask({ id: "t2", workstream: "ws-b", status: "pending" }),
-      makeTask({ id: "t3", workstream: "ws-a", status: "pending", depends_on: ["t1"] }),
+      makeTask({
+        id: "t3",
+        workstream: "ws-a",
+        status: "pending",
+        depends_on: ["t1"],
+      }),
     ]);
     const result = findAllReadyTasks(data);
     expect(result).toEqual(["t1", "t2"]);
@@ -281,13 +289,11 @@ describe("getTasksByStatus", () => {
       makeTask({ id: "t4", status: "in_progress" }),
     ]);
     const result = getTasksByStatus(data, "pending");
-    expect(result.map(t => t.id)).toEqual(["t1", "t3"]);
+    expect(result.map((t) => t.id)).toEqual(["t1", "t3"]);
   });
 
   test("returns empty array when no tasks match", () => {
-    const data = makeTasksData([
-      makeTask({ id: "t1", status: "pending" }),
-    ]);
+    const data = makeTasksData([makeTask({ id: "t1", status: "pending" })]);
     expect(getTasksByStatus(data, "completed")).toEqual([]);
   });
 

@@ -1,7 +1,15 @@
 import { describe, test, expect } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
-import { buildTestingContextBlock, buildSelfReviewBlock, buildTaskPrompt, extractDefinitionOfDone, appendReviewFeedback, markReviewFeedbackResolved, resolveTaskFilePath } from "./cli.js";
+import {
+  buildTestingContextBlock,
+  buildSelfReviewBlock,
+  buildTaskPrompt,
+  extractDefinitionOfDone,
+  appendReviewFeedback,
+  markReviewFeedbackResolved,
+  resolveTaskFilePath,
+} from "./cli.js";
 import type { Task } from "./constants.js";
 
 // =============================================================================
@@ -17,7 +25,9 @@ describe("buildTestingContextBlock", () => {
     });
     expect(block).toContain("Test command: `npm test`");
     expect(block).toContain("Framework: vitest");
-    expect(block).toContain("Conventions: tests in __tests__/, named *.test.ts");
+    expect(block).toContain(
+      "Conventions: tests in __tests__/, named *.test.ts",
+    );
   });
 
   test("includes only test command when other fields are absent", () => {
@@ -80,7 +90,9 @@ describe("buildSelfReviewBlock", () => {
     expect(block).toContain("### Evidence Requirement");
     expect(block).toContain("Show actual test command output");
     expect(block).toContain("All tests must pass with zero failures");
-    expect(block).toContain("If you cannot run tests, explain why and flag for review");
+    expect(block).toContain(
+      "If you cannot run tests, explain why and flag for review",
+    );
   });
 
   test("includes testing context from metadata", () => {
@@ -105,7 +117,9 @@ describe("buildSelfReviewBlock", () => {
       specialistPremises: "Use consistent naming\nFollow DRY principles",
       testingContextBlock: buildTestingContextBlock(null),
     });
-    expect(block).toContain("Apply the specialist's standards as the quality bar");
+    expect(block).toContain(
+      "Apply the specialist's standards as the quality bar",
+    );
     expect(block).toContain("Use consistent naming");
     expect(block).toContain("Follow DRY principles");
     expect(block).not.toContain("default quality standards");
@@ -124,9 +138,15 @@ describe("buildSelfReviewBlock", () => {
     const block = buildSelfReviewBlock({
       testingContextBlock: buildTestingContextBlock(null),
     });
-    expect(block).toContain("Write tests before production code — follow the RED-GREEN-REFACTOR cycle");
-    expect(block).toContain("Show actual test command output as evidence before claiming task completion");
-    expect(block).toContain("Tests must verify real behavior, not mock behavior");
+    expect(block).toContain(
+      "Write tests before production code — follow the RED-GREEN-REFACTOR cycle",
+    );
+    expect(block).toContain(
+      "Show actual test command output as evidence before claiming task completion",
+    );
+    expect(block).toContain(
+      "Tests must verify real behavior, not mock behavior",
+    );
   });
 
   test("includes specialist test expectations when provided", () => {
@@ -183,7 +203,8 @@ describe("buildSelfReviewBlock", () => {
 
 describe("extractDefinitionOfDone", () => {
   test("returns null when markdown has no Definition of Done section", () => {
-    const md = "### Task\nSome instructions.\n\n## Implementation\nDo the thing.";
+    const md =
+      "### Task\nSome instructions.\n\n## Implementation\nDo the thing.";
     expect(extractDefinitionOfDone(md)).toBeNull();
   });
 
@@ -295,11 +316,17 @@ describe("buildTaskPrompt", () => {
     const tmpDir = join("/tmp", "bart-prompt-test-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
     const tasksPath = join(tmpDir, "tasks.json");
-    const markdownContent = "### Build API endpoint\nDetailed instructions.\n\n**Test first:**\n- Create `src/api.test.ts`\n\n**Implementation:**\n- Modify `src/api.ts`";
+    const markdownContent =
+      "### Build API endpoint\nDetailed instructions.\n\n**Test first:**\n- Create `src/api.test.ts`\n\n**Implementation:**\n- Modify `src/api.ts`";
     writeFileSync(join(tmpDir, "task-A1.md"), markdownContent);
 
     const task = makeTask();
-    const prompt = buildTaskPrompt(task, tasksPath, specialistContext, selfReviewBlock);
+    const prompt = buildTaskPrompt(
+      task,
+      tasksPath,
+      specialistContext,
+      selfReviewBlock,
+    );
 
     expect(prompt).toContain(markdownContent);
     expect(prompt).toContain(specialistContext);
@@ -318,10 +345,17 @@ describe("buildTaskPrompt", () => {
     // No task-A1.md file created
 
     const task = makeTask();
-    const prompt = buildTaskPrompt(task, tasksPath, specialistContext, selfReviewBlock);
+    const prompt = buildTaskPrompt(
+      task,
+      tasksPath,
+      specialistContext,
+      selfReviewBlock,
+    );
 
     expect(prompt).toContain("Task: Build API endpoint");
-    expect(prompt).toContain("Description: Create the REST endpoint for users.");
+    expect(prompt).toContain(
+      "Description: Create the REST endpoint for users.",
+    );
     expect(prompt).toContain("Files to work on: src/api.ts, src/api.test.ts");
     expect(prompt).toContain(specialistContext);
     expect(prompt).toContain(selfReviewBlock);
@@ -337,7 +371,12 @@ describe("buildTaskPrompt", () => {
     writeFileSync(join(tmpDir, "task-B2.md"), "### Task B2\nMarkdown content.");
 
     const task = makeTask({ id: "B2" });
-    const prompt = buildTaskPrompt(task, tasksPath, specialistContext, selfReviewBlock);
+    const prompt = buildTaskPrompt(
+      task,
+      tasksPath,
+      specialistContext,
+      selfReviewBlock,
+    );
 
     expect(prompt).toContain("### Task B2\nMarkdown content.");
     expect(prompt).toContain(specialistContext);
@@ -398,7 +437,10 @@ Detailed instructions.
     const tmpDir = join("/tmp", "bart-prompt-dod-test-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
     const tasksPath = join(tmpDir, "tasks.json");
-    writeFileSync(join(tmpDir, "task-A1.md"), "### Task\nJust instructions, no DoD.");
+    writeFileSync(
+      join(tmpDir, "task-A1.md"),
+      "### Task\nJust instructions, no DoD.",
+    );
 
     const task = makeTask();
     const testingBlock = buildTestingContextBlock(null);
@@ -416,17 +458,32 @@ Detailed instructions.
 
   test("reads markdown from same directory as tasksPath", () => {
     // Verify it reads from dirname(tasksPath), not cwd
-    const tmpDir = join("/tmp", "bart-prompt-test-" + Date.now(), "nested", "plan");
+    const tmpDir = join(
+      "/tmp",
+      "bart-prompt-test-" + Date.now(),
+      "nested",
+      "plan",
+    );
     mkdirSync(tmpDir, { recursive: true });
     const tasksPath = join(tmpDir, "tasks.json");
-    writeFileSync(join(tmpDir, "task-C1.md"), "### Nested task\nFrom nested dir.");
+    writeFileSync(
+      join(tmpDir, "task-C1.md"),
+      "### Nested task\nFrom nested dir.",
+    );
 
     const task = makeTask({ id: "C1" });
     const prompt = buildTaskPrompt(task, tasksPath, "", selfReviewBlock);
 
     expect(prompt).toContain("### Nested task\nFrom nested dir.");
 
-    rmSync(join("/tmp", "bart-prompt-test-" + tmpDir.split("bart-prompt-test-")[1].split("/")[0]), { recursive: true });
+    rmSync(
+      join(
+        "/tmp",
+        "bart-prompt-test-" +
+          tmpDir.split("bart-prompt-test-")[1].split("/")[0],
+      ),
+      { recursive: true },
+    );
   });
 });
 
@@ -488,7 +545,10 @@ Detailed instructions.
     const tmpDir = join("/tmp", "bart-assemble-test-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
     const tasksPath = join(tmpDir, "tasks.json");
-    writeFileSync(join(tmpDir, "task-A1.md"), "### Task\nJust instructions, no DoD.");
+    writeFileSync(
+      join(tmpDir, "task-A1.md"),
+      "### Task\nJust instructions, no DoD.",
+    );
 
     const task = makeTask();
     const prompt = assembleTaskPrompt({
@@ -533,11 +593,14 @@ Detailed instructions.
     const tmpDir = join("/tmp", "bart-assemble-test-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
     const tasksPath = join(tmpDir, "tasks.json");
-    writeFileSync(join(tmpDir, "task-A1.md"), `### Task
+    writeFileSync(
+      join(tmpDir, "task-A1.md"),
+      `### Task
 Instructions.
 
 ## Definition of Done
-- [ ] Tests pass`);
+- [ ] Tests pass`,
+    );
 
     const task = makeTask();
     const prompt = assembleTaskPrompt({
@@ -569,9 +632,15 @@ describe("appendReviewFeedback", () => {
     const tmpDir = join("/tmp", "bart-feedback-test-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
     const taskMdPath = join(tmpDir, "task-A1.md");
-    writeFileSync(taskMdPath, "### Task A1\nBuild the API endpoint.\n\n## Definition of Done\n- [ ] Tests pass\n");
+    writeFileSync(
+      taskMdPath,
+      "### Task A1\nBuild the API endpoint.\n\n## Definition of Done\n- [ ] Tests pass\n",
+    );
 
-    const result = appendReviewFeedback(taskMdPath, ["Missing error handling", "No input validation"]);
+    const result = appendReviewFeedback(taskMdPath, [
+      "Missing error handling",
+      "No input validation",
+    ]);
 
     expect(result).toBe(true);
     const content = readFileSync(taskMdPath, "utf-8");
@@ -587,16 +656,22 @@ describe("appendReviewFeedback", () => {
     const tmpDir = join("/tmp", "bart-feedback-test-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
     const taskMdPath = join(tmpDir, "task-A1.md");
-    writeFileSync(taskMdPath, `### Task A1
+    writeFileSync(
+      taskMdPath,
+      `### Task A1
 Build the API endpoint.
 
 ## Review Feedback
 
 ### Attempt 1 — REJECTED
 - Missing error handling
-`);
+`,
+    );
 
-    const result = appendReviewFeedback(taskMdPath, ["Still no validation", "Tests incomplete"]);
+    const result = appendReviewFeedback(taskMdPath, [
+      "Still no validation",
+      "Tests incomplete",
+    ]);
 
     expect(result).toBe(true);
     const content = readFileSync(taskMdPath, "utf-8");
@@ -612,7 +687,11 @@ Build the API endpoint.
   });
 
   test("returns false and does not create file when task markdown does not exist", () => {
-    const taskMdPath = join("/tmp", "bart-feedback-test-nonexistent-" + Date.now(), "task-X1.md");
+    const taskMdPath = join(
+      "/tmp",
+      "bart-feedback-test-nonexistent-" + Date.now(),
+      "task-X1.md",
+    );
 
     const result = appendReviewFeedback(taskMdPath, ["Some issue"]);
 
@@ -687,7 +766,12 @@ test("works", () => { expect(true).toBe(true); });
       completed_at: null,
       error: null,
     };
-    const prompt = buildTaskPrompt(task, tasksPath, "", "\n\n## Self-Review\nCheck.");
+    const prompt = buildTaskPrompt(
+      task,
+      tasksPath,
+      "",
+      "\n\n## Self-Review\nCheck.",
+    );
 
     expect(prompt).toContain("## Review Feedback");
     expect(prompt).toContain("### Attempt 1 — REJECTED");
@@ -700,7 +784,9 @@ test("works", () => { expect(true).toBe(true); });
     const tmpDir = join("/tmp", "bart-feedback-test-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
     const taskMdPath = join(tmpDir, "task-A1.md");
-    writeFileSync(taskMdPath, `### Task A1
+    writeFileSync(
+      taskMdPath,
+      `### Task A1
 Do the thing.
 
 ## Review Feedback
@@ -710,7 +796,8 @@ Do the thing.
 
 ### Attempt 2 — REJECTED
 - Issue two
-`);
+`,
+    );
 
     appendReviewFeedback(taskMdPath, ["Issue three"]);
 
@@ -734,21 +821,26 @@ describe("markReviewFeedbackResolved", () => {
     const tmpDir = join("/tmp", "bart-resolved-test-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
     const taskMdPath = join(tmpDir, "task-A1.md");
-    writeFileSync(taskMdPath, `### Task A1
+    writeFileSync(
+      taskMdPath,
+      `### Task A1
 Do the thing.
 
 ## Review Feedback
 
 ### Attempt 1 — REJECTED
 - Missing error handling
-`);
+`,
+    );
 
     const result = markReviewFeedbackResolved(taskMdPath);
 
     expect(result).toBe(true);
     const content = readFileSync(taskMdPath, "utf-8");
     expect(content).toContain("### Resolved");
-    expect(content).toContain("All previous review issues have been addressed. Review passed.");
+    expect(content).toContain(
+      "All previous review issues have been addressed. Review passed.",
+    );
     // Original feedback preserved as audit trail
     expect(content).toContain("### Attempt 1 — REJECTED");
     expect(content).toContain("- Missing error handling");
@@ -775,7 +867,9 @@ Do the thing.
     const tmpDir = join("/tmp", "bart-resolved-test-" + Date.now());
     mkdirSync(tmpDir, { recursive: true });
     const taskMdPath = join(tmpDir, "task-A1.md");
-    writeFileSync(taskMdPath, `### Task A1
+    writeFileSync(
+      taskMdPath,
+      `### Task A1
 Do the thing.
 
 ## Review Feedback
@@ -785,7 +879,8 @@ Do the thing.
 
 ### Resolved
 All previous review issues have been addressed. Review passed.
-`);
+`,
+    );
 
     const result = markReviewFeedbackResolved(taskMdPath);
 
@@ -799,7 +894,9 @@ All previous review issues have been addressed. Review passed.
   });
 
   test("returns false when file does not exist", () => {
-    const result = markReviewFeedbackResolved("/tmp/nonexistent-file-" + Date.now() + ".md");
+    const result = markReviewFeedbackResolved(
+      "/tmp/nonexistent-file-" + Date.now() + ".md",
+    );
     expect(result).toBe(false);
   });
 });
@@ -836,7 +933,12 @@ describe("resolveTaskFilePath", () => {
   });
 
   test("resolves path relative to tasksPath directory, not cwd", () => {
-    const tmpDir = join("/tmp", "bart-taskfile-test-" + Date.now(), "nested", "plan");
+    const tmpDir = join(
+      "/tmp",
+      "bart-taskfile-test-" + Date.now(),
+      "nested",
+      "plan",
+    );
     mkdirSync(tmpDir, { recursive: true });
     const tasksPath = join(tmpDir, "tasks.json");
     writeFileSync(join(tmpDir, "task-C1.md"), "### Task C1\nNested.");
@@ -846,7 +948,14 @@ describe("resolveTaskFilePath", () => {
     expect(result).toBe(join(tmpDir, "task-C1.md"));
     expect(result).toContain("/nested/plan/task-C1.md");
 
-    rmSync(join("/tmp", "bart-taskfile-test-" + tmpDir.split("bart-taskfile-test-")[1].split("/")[0]), { recursive: true });
+    rmSync(
+      join(
+        "/tmp",
+        "bart-taskfile-test-" +
+          tmpDir.split("bart-taskfile-test-")[1].split("/")[0],
+      ),
+      { recursive: true },
+    );
   });
 });
 
@@ -856,7 +965,10 @@ describe("resolveTaskFilePath", () => {
 
 describe("buildTaskPrompt with resolved review feedback", () => {
   test("prompt includes both feedback and resolved marker after round-trip", () => {
-    const tmpDir = join("/tmp", "bart-feedback-resolved-integration-" + Date.now());
+    const tmpDir = join(
+      "/tmp",
+      "bart-feedback-resolved-integration-" + Date.now(),
+    );
     mkdirSync(tmpDir, { recursive: true });
     const tasksPath = join(tmpDir, "tasks.json");
     const taskMdPath = join(tmpDir, "task-A1.md");
@@ -879,13 +991,20 @@ describe("buildTaskPrompt with resolved review feedback", () => {
       completed_at: null,
       error: null,
     };
-    const prompt = buildTaskPrompt(task, tasksPath, "", "\n\n## Self-Review\nCheck.");
+    const prompt = buildTaskPrompt(
+      task,
+      tasksPath,
+      "",
+      "\n\n## Self-Review\nCheck.",
+    );
 
     // Both feedback and resolved marker visible in agent prompt
     expect(prompt).toContain("### Attempt 1 — REJECTED");
     expect(prompt).toContain("- Missing validation");
     expect(prompt).toContain("### Resolved");
-    expect(prompt).toContain("All previous review issues have been addressed. Review passed.");
+    expect(prompt).toContain(
+      "All previous review issues have been addressed. Review passed.",
+    );
 
     rmSync(tmpDir, { recursive: true });
   });
