@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from package.json
+        id: version
+        run: echo "version=v$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Check if release already exists
+        id: check
+        run: |
+          if gh release view "${{ steps.version.outputs.version }}" &>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        run: gh release create "${{ steps.version.outputs.version }}" --generate-notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-formula:
+    needs: [release]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from package.json
+        id: version
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Download release tarball and compute sha256
+        id: sha
+        run: |
+          curl -sL "https://github.com/leandrostoroli/bart-loop/archive/refs/tags/v${{ steps.version.outputs.version }}.tar.gz" -o release.tar.gz
+          sha256=$(shasum -a 256 release.tar.gz | awk '{print $1}')
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Clone homebrew-bart tap repo
+        run: |
+          git clone "https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/leandrostoroli/homebrew-bart.git" tap-repo
+
+      - name: Update formula in tap repo
+        run: |
+          cp homebrew/bart.rb tap-repo/Formula/bart.rb
+          cd tap-repo
+          sed -i "s|PLACEHOLDER_SHA256|${{ steps.sha.outputs.sha256 }}|g" Formula/bart.rb
+
+      - name: Commit and push to homebrew-bart
+        run: |
+          cd tap-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/bart.rb
+          git diff --cached --quiet || (git commit -m "Update bart formula to v${{ steps.version.outputs.version }}" && git push)
