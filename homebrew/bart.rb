@@ -18,6 +18,10 @@ class Bart < Formula
     SH
   end
 
+  def post_install
+    system bin/"bart", "install"
+  end
+
   test do
     system bin/"bart", "--help"
   end

@@ -37,4 +37,10 @@ describe("Homebrew formula template", () => {
     expect(content).toContain("test do");
     expect(content).toContain("bart");
   });
+
+  test("has post_install that runs bart install", () => {
+    const content = readFileSync(formulaPath, "utf-8");
+    expect(content).toContain("def post_install");
+    expect(content).toContain('bart", "install"');
+  });
 });
