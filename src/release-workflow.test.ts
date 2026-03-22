@@ -65,4 +65,9 @@ describe("Formula update job", () => {
     const content = readFileSync(workflowPath, "utf-8");
     expect(content).toContain("HOMEBREW_TAP_TOKEN");
   });
+
+  test("creates Formula directory before copying", () => {
+    const content = readFileSync(workflowPath, "utf-8");
+    expect(content).toContain("mkdir -p tap-repo/Formula");
+  });
 });

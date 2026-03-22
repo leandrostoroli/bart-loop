@@ -59,6 +59,7 @@ jobs:
 
       - name: Update formula in tap repo
         run: |
+          mkdir -p tap-repo/Formula
           cp homebrew/bart.rb tap-repo/Formula/bart.rb
           cd tap-repo
           sed -i "s|PLACEHOLDER_SHA256|${{ steps.sha.outputs.sha256 }}|g" Formula/bart.rb
