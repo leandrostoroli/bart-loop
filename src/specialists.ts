@@ -1504,6 +1504,83 @@ export function appendProfileLearning(
 }
 
 /**
+ * Build the body content for a specialist profile, including premises,
+ * resolved skill/agent contents, and recent learnings.
+ *
+ * Shared helper used by both resolveProfileContext() and generateAgentFile().
+ */
+function buildProfileBody(
+  profile: Specialist,
+  allSpecialists?: Specialist[],
+  maxLearnings = 10,
+): string[] {
+  const lines: string[] = [];
+
+  if (profile.premises) {
+    lines.push("");
+    lines.push("## Guidelines & Standards");
+    lines.push(profile.premises);
+  }
+
+  // Resolve referenced skills [REQ-03]
+  const skillNames = profile.skills || [];
+  if (skillNames.length > 0 && allSpecialists) {
+    const resolvedSkills = resolveReferencedSpecialists(
+      skillNames,
+      allSpecialists,
+    );
+    if (resolvedSkills.length > 0) {
+      lines.push("");
+      lines.push("## Available Skills");
+      lines.push("");
+      lines.push(
+        "You have the following skills available. Invoke them with the Skill tool when appropriate:",
+      );
+      for (const { name, description } of resolvedSkills) {
+        const desc = description ? ` — ${description}` : "";
+        lines.push(`- \`/${name}\`${desc}`);
+      }
+      lines.push("");
+      lines.push("### Skill Reference");
+      for (const { name, content } of resolvedSkills) {
+        lines.push("");
+        lines.push(`#### ${name}`);
+        lines.push(content);
+      }
+    }
+  }
+
+  // Resolve referenced agents [REQ-03]
+  const agentNames = profile.agents || [];
+  if (agentNames.length > 0 && allSpecialists) {
+    const resolvedAgents = resolveReferencedSpecialists(
+      agentNames,
+      allSpecialists,
+    );
+    if (resolvedAgents.length > 0) {
+      lines.push("");
+      lines.push("## Agents");
+      for (const { name, content } of resolvedAgents) {
+        lines.push("");
+        lines.push(`### ${name}`);
+        lines.push(content);
+      }
+    }
+  }
+
+  if (profile.learnings && profile.learnings.length > 0) {
+    const recent = profile.learnings.slice(-maxLearnings);
+    lines.push("");
+    lines.push(`## Recent Learnings (last ${maxLearnings})`);
+    for (const entry of recent) {
+      lines.push(`- ${entry}`);
+    }
+  }
+
+  return lines;
+}
+
+/**
  * Resolve rich prompt context for a specialist, including profile premises,
  * resolved skill/agent contents, and recent learnings [REQ-03].
  *
@@ -1528,57 +1605,7 @@ export function resolveProfileContext(
   if (specialist.type === "profile" && specialist.path) {
     const profile = parseProfile(specialist.path);
     if (profile) {
-      if (profile.premises) {
-        lines.push("");
-        lines.push("## Guidelines & Standards");
-        lines.push(profile.premises);
-      }
-
-      // Resolve referenced skills [REQ-03]
-      const skillNames = profile.skills || [];
-      if (skillNames.length > 0 && allSpecialists) {
-        const resolvedSkills = resolveReferencedSpecialists(
-          skillNames,
-          allSpecialists,
-        );
-        if (resolvedSkills.length > 0) {
-          lines.push("");
-          lines.push("## Skills");
-          for (const { name, content } of resolvedSkills) {
-            lines.push("");
-            lines.push(`### ${name}`);
-            lines.push(content);
-          }
-        }
-      }
-
-      // Resolve referenced agents [REQ-03]
-      const agentNames = profile.agents || [];
-      if (agentNames.length > 0 && allSpecialists) {
-        const resolvedAgents = resolveReferencedSpecialists(
-          agentNames,
-          allSpecialists,
-        );
-        if (resolvedAgents.length > 0) {
-          lines.push("");
-          lines.push("## Agents");
-          for (const { name, content } of resolvedAgents) {
-            lines.push("");
-            lines.push(`### ${name}`);
-            lines.push(content);
-          }
-        }
-      }
-
-      if (profile.learnings && profile.learnings.length > 0) {
-        const recent = profile.learnings.slice(-10);
-        lines.push("");
-        lines.push("## Recent Learnings (last 10)");
-        for (const entry of recent) {
-          lines.push(`- ${entry}`);
-        }
-      }
-
+      lines.push(...buildProfileBody(profile, allSpecialists));
       return lines.join("\n");
     }
   }
@@ -1589,15 +1616,80 @@ export function resolveProfileContext(
 }
 
 /**
+ * Generate a Claude Code agent .md file from a specialist profile.
+ *
+ * The generated file uses Claude Code's agent format:
+ * - Frontmatter: name, description, tools, model
+ * - Body: system prompt built from role, premises, resolved skills/agents, learnings
+ *
+ * The specialist .md remains the source of truth. The agent .md is a generated
+ * artifact that should be regenerated before each task run to include fresh learnings.
+ */
+export function generateAgentFile(
+  specialist: Specialist,
+  allSpecialists: Specialist[],
+  options?: { model?: string; maxLearnings?: number },
+): string {
+  // Re-parse for fresh content
+  const profile =
+    specialist.type === "profile" && specialist.path
+      ? parseProfile(specialist.path)
+      : null;
+  const source = profile || specialist;
+
+  // Read model from specialist frontmatter if available
+  let model = "sonnet";
+  if (specialist.path && existsSync(specialist.path)) {
+    const fm = parseFrontmatter(readFileSync(specialist.path, "utf-8"));
+    if (typeof fm.model === "string" && fm.model.trim()) {
+      model = fm.model.trim();
+    }
+  }
+  // Explicit option takes highest priority
+  if (options?.model) {
+    model = options.model;
+  }
+
+  // Build frontmatter
+  const fmLines: string[] = ["---"];
+  fmLines.push(`name: bart-${source.name}`);
+  fmLines.push(`description: ${source.description}`);
+  if (source.tools && source.tools.length > 0) {
+    fmLines.push(`tools: ${source.tools.join(", ")}`);
+  }
+  fmLines.push(`model: ${model}`);
+  fmLines.push("---");
+
+  // Build body (system prompt)
+  const bodyLines: string[] = [];
+  bodyLines.push(
+    `<!-- Generated by bart from ${specialist.path ? basename(specialist.path) : specialist.name} — do not edit manually -->`,
+  );
+  bodyLines.push("");
+
+  if (source.role) {
+    bodyLines.push(`You are a ${source.role}.`);
+  } else {
+    bodyLines.push(`You are a specialist: ${source.description}.`);
+  }
+
+  bodyLines.push(
+    ...buildProfileBody(source, allSpecialists, options?.maxLearnings),
+  );
+
+  return fmLines.join("\n") + "\n\n" + bodyLines.join("\n") + "\n";
+}
+
+/**
  * Look up specialists by name from the full list and read their file contents.
- * Returns an array of { name, content } for each successfully resolved reference.
+ * Returns an array of { name, description, content } for each successfully resolved reference.
  * Strips frontmatter from the content so only the body is included.
  */
 function resolveReferencedSpecialists(
   names: string[],
   allSpecialists: Specialist[],
-): { name: string; content: string }[] {
-  const results: { name: string; content: string }[] = [];
+): { name: string; description: string; content: string }[] {
+  const results: { name: string; description: string; content: string }[] = [];
 
   for (const refName of names) {
     const match = allSpecialists.find(
@@ -1610,7 +1702,11 @@ function resolveReferencedSpecialists(
       // Strip frontmatter (--- ... ---) to keep only body content
       const body = raw.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "").trim();
       if (body) {
-        results.push({ name: match.name, content: body });
+        results.push({
+          name: match.name,
+          description: match.description,
+          content: body,
+        });
       }
     } catch {
       // Skip unreadable files silently
@@ -1941,4 +2037,51 @@ export function generateSpecialistsSummary(
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Generate and write a Claude Code agent file for a specialist profile.
+ *
+ * Returns the absolute path of the written agent file, or null if the
+ * specialist is not a profile type or has no path.
+ */
+export function writeAgentFile(
+  specialist: Specialist,
+  allSpecialists: Specialist[],
+  projectRoot?: string,
+): string | null {
+  if (specialist.type !== "profile" || !specialist.path) return null;
+
+  const agentMd = generateAgentFile(specialist, allSpecialists);
+  const agentName = `bart-${specialist.name}`;
+
+  const isGlobal = specialist.path.startsWith(join(HOME, ".bart"));
+  const agentDir = isGlobal
+    ? join(HOME, ".claude", "agents")
+    : join(projectRoot || process.cwd(), ".claude", "agents");
+
+  mkdirSync(agentDir, { recursive: true });
+  const agentPath = join(agentDir, `${agentName}.md`);
+  writeFileSync(agentPath, agentMd);
+  return agentPath;
+}
+
+/**
+ * Sync all specialist profiles to Claude Code agent files.
+ *
+ * Discovers all specialists, generates agent files for every profile-type
+ * specialist, and returns the list of paths written.
+ */
+export function syncAgentFiles(projectRoot?: string): string[] {
+  const cwd = projectRoot || process.cwd();
+  const specialists = discoverSpecialists(cwd);
+  const written: string[] = [];
+
+  for (const s of specialists) {
+    if (s.type !== "profile") continue;
+    const path = writeAgentFile(s, specialists, cwd);
+    if (path) written.push(path);
+  }
+
+  return written;
 }

@@ -195,6 +195,31 @@ describe("buildSelfReviewBlock", () => {
     expect(block).toContain("Framework: vitest");
     expect(block).toContain("Conventions: co-located *.test.ts files");
   });
+
+  test("uses system prompt reference when premisesInSystemPrompt is true", () => {
+    const block = buildSelfReviewBlock({
+      specialistPremises: "Follow strict typing\nUse DRY principles",
+      testingContextBlock: buildTestingContextBlock(null),
+      premisesInSystemPrompt: true,
+    });
+    expect(block).toContain(
+      "Apply your specialist guidelines and standards as the quality bar",
+    );
+    // Should NOT inline the actual premises text
+    expect(block).not.toContain("Follow strict typing");
+    expect(block).not.toContain("Use DRY principles");
+    expect(block).not.toContain("default quality standards");
+  });
+
+  test("premisesInSystemPrompt takes priority over inline premises", () => {
+    const block = buildSelfReviewBlock({
+      specialistPremises: "Some premises",
+      testingContextBlock: buildTestingContextBlock(null),
+      premisesInSystemPrompt: true,
+    });
+    expect(block).toContain("system prompt");
+    expect(block).not.toContain("Some premises");
+  });
 });
 
 // =============================================================================

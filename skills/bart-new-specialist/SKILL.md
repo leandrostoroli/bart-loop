@@ -290,7 +290,15 @@ test_expectations:
 
 **Important:** The `## Learnings` section must be present but empty. Bart auto-appends structured entries here after task completion. Never pre-populate it.
 
-After writing, verify the profile is discoverable:
+After writing the profile, **generate the corresponding Claude Code agent file**:
+
+```bash
+bart sync-agents
+```
+
+This creates a `.claude/agents/bart-[name].md` file (project-local or global, matching the specialist location) so the specialist is immediately usable as a Claude Code agent. A specialist profile should never exist without its agent file.
+
+Then verify the profile is discoverable:
 
 ```bash
 bart specialists 2>/dev/null | grep -i "[name]" || echo "Profile not yet discovered — run bart specialists to verify after install"
@@ -321,6 +329,7 @@ Then output the completion summary:
 Specialist created: [name]
   Role: [role]
   Location: [path]
+  Agent file: .claude/agents/bart-[name].md
   Skills: [list or "none"]
   Agents: [list or "none"]
   Premises: [line count] lines
@@ -328,6 +337,7 @@ Specialist created: [name]
 The specialist will be discovered automatically by bart on next run.
 To see all specialists: bart specialists
 To see matching: bart suggest "your task description"
+To regenerate agent files: bart sync-agents
 ```
 
 ## Key Principles

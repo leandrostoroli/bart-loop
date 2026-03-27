@@ -57,6 +57,9 @@ import {
   generateSpecialistsSummary,
   appendProfileLearning,
   resolveProfileContext,
+  generateAgentFile,
+  writeAgentFile,
+  syncAgentFiles,
 } from "./specialists.js";
 import {
   generateZshCompletion,
@@ -791,12 +794,14 @@ export function buildSelfReviewBlock(options: {
   specialistTestExpectations?: string[];
   testingContextBlock: string;
   definitionOfDone?: string | null;
+  premisesInSystemPrompt?: boolean;
 }): string {
   const {
     specialistPremises,
     specialistTestExpectations,
     testingContextBlock,
     definitionOfDone,
+    premisesInSystemPrompt,
   } = options;
   const defaultQualityGate = DEFAULT_QUALITY_GATE.map((s) => `\n- ${s}`).join(
     "",
@@ -815,14 +820,17 @@ Before marking this task as done, you MUST perform a self-review. Do NOT conside
 
 ### 2. Code Quality Check
 - Review all changes for correctness, readability, and maintainability${
-    specialistPremises
+    premisesInSystemPrompt
       ? `
+- Apply your specialist guidelines and standards as the quality bar (see your system prompt)`
+      : specialistPremises
+        ? `
 - Apply the specialist's standards as the quality bar:
 ${specialistPremises
   .split("\n")
   .map((line) => `  ${line}`)
   .join("\n")}`
-      : `
+        : `
 - Apply these default quality standards:${defaultQualityGate}`
   }
 
@@ -969,6 +977,7 @@ export function assembleTaskPrompt(options: {
   specialistPremises: string;
   specialistTestExpectations?: string[];
   testingMetadata?: import("./constants.js").TestingMetadata | null;
+  premisesInSystemPrompt?: boolean;
 }): string {
   const {
     task,
@@ -977,6 +986,7 @@ export function assembleTaskPrompt(options: {
     specialistPremises,
     specialistTestExpectations,
     testingMetadata,
+    premisesInSystemPrompt,
   } = options;
 
   const testingContextBlock = buildTestingContextBlock(testingMetadata);
@@ -995,6 +1005,7 @@ export function assembleTaskPrompt(options: {
     specialistTestExpectations,
     testingContextBlock,
     definitionOfDone,
+    premisesInSystemPrompt,
   });
 
   return buildTaskPrompt(task, tasksPath, specialistContext, selfReviewBlock);
@@ -1065,17 +1076,36 @@ export async function runAgent(
   let specialistContext = "";
   let specialistPremises = "";
   let specialistTestExpectations: string[] | undefined;
+  let premisesInSystemPrompt = false;
+  let agentName: string | undefined;
   if (task.specialist) {
     const specialists = discoverSpecialists(projectRoot);
     const specialist = specialists.find((s) => s.name === task.specialist);
     if (specialist) {
-      specialistContext =
-        "\n" + resolveProfileContext(specialist, specialists) + "\n";
-      if (specialist.premises) {
-        specialistPremises = specialist.premises;
-      }
       specialistTestExpectations = specialist.test_expectations;
       console.log(`   Specialist: ${specialist.name} (${specialist.type})\n`);
+
+      // For claude + profile specialists, generate a Claude Code agent file
+      if (
+        specialist.type === "profile" &&
+        agentConfig.cmd === "claude" &&
+        specialist.path
+      ) {
+        writeAgentFile(specialist, specialists, projectRoot);
+        agentName = `bart-${specialist.name}`;
+        premisesInSystemPrompt = true;
+        // Premises are in the agent system prompt, no need for inline context
+        if (specialist.premises) {
+          specialistPremises = specialist.premises;
+        }
+      } else {
+        // Fallback: inline specialist context into the prompt (opencode or non-profile)
+        specialistContext =
+          "\n" + resolveProfileContext(specialist, specialists) + "\n";
+        if (specialist.premises) {
+          specialistPremises = specialist.premises;
+        }
+      }
     }
   }
 
@@ -1087,9 +1117,14 @@ export async function runAgent(
     specialistPremises,
     specialistTestExpectations,
     testingMetadata: tasksData.testing,
+    premisesInSystemPrompt,
   });
 
-  const args = [...agentConfig.args, taskPrompt];
+  const args = [...agentConfig.args];
+  if (agentName) {
+    args.push("--agent", agentName);
+  }
+  args.push(taskPrompt);
 
   // Track for graceful shutdown
   currentTasksPath = tasksPath;
@@ -2417,6 +2452,19 @@ export async function main() {
         }
       }
       break;
+
+    case "sync-agents": {
+      const written = syncAgentFiles(cwd);
+      if (written.length === 0) {
+        console.log("\nNo profile specialists found to sync.");
+      } else {
+        console.log(`\nSynced ${written.length} agent file(s):`);
+        for (const p of written) {
+          console.log(`  ${p}`);
+        }
+      }
+      break;
+    }
 
     case "suggest": {
       const taskDescription = specificTask;
